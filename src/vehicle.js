@@ -49,8 +49,8 @@ export const CAR_SPECS = [
 // RALLY (art of rally): wider peak slip, flatter fall-off (~92 % of peak held deep into a slide) so slides are
 // progressive and catchable, rear a touch lighter than the front so the car rotates on lift-off, a flick or the handbrake.
 const SIM = { kp: KP, ap: AP, c: TC, b: TB, front: 1.12, rear: 1.02, load: 0.0 };
-const RALLY = { kp: 0.12, ap: 0.17, c: 1.25, b: 3.08, front: 1.0, rear: 0.94, load: 0.14,
-	lock: 0.52, lockV: 30, maxLock: 0.62, assist: 0.7, steerRate: 7, yawDamp: 0.35, lsd: 0.65, lsdF: 0.35 };
+const RALLY = { kp: 0.12, ap: 0.17, c: 1.25, b: 3.08, front: 1.03, rear: 0.98, load: 0.1, comb: 0.6, spin: 1.6, combR: 1.0, spinR: 3.5,
+	lock: 0.52, lockV: 30, maxLock: 0.62, assist: 0.55, pull: 0.07, steerRate: 7, yawDamp: 0.6, lsd: 0.5, lsdF: 0.35 };
 const GRIP = [ 0.58, 1.0, 0.92, 0.64, 0.85 ]; // off-road, asphalt, paving, gravel, cobbles
 
 export class Vehicle {
@@ -196,7 +196,10 @@ export class Vehicle {
 			let beta = sp > 3 && vF > 0 ? Math.atan2( vL, vF ) : 0;
 			beta = Math.sign( beta ) * Math.max( 0, Math.abs( beta ) - 0.03 );
 			const lock = RALLY.lock / ( 1 + Math.abs( vF ) / RALLY.lockV );
-			steerTarget = Math.max( - RALLY.maxLock, Math.min( RALLY.maxLock, inp.steer * lock + RALLY.assist * Math.max( - 0.6, Math.min( 0.6, beta ) ) ) );
+						// the assist leaves the front wheels a few degrees inside the direction of travel (pullAngle), so the
+			// front tyres keep working and drag the car round towards the nose instead of rolling along with the slide
+			const ab = Math.abs( beta ), aim = Math.sign( beta ) * Math.max( 0, Math.min( 0.6, ab ) * RALLY.assist - RALLY.pull * Math.min( 1, ab / 0.15 ) );
+			steerTarget = Math.max( - RALLY.maxLock, Math.min( RALLY.maxLock, inp.steer * ( lock + 0.6 * RALLY.assist * Math.min( 0.6, ab ) ) + aim ) );
 
 		} else steerTarget = inp.steer * 0.6 / ( 1 + Math.abs( vF ) / 32 );
 
@@ -340,7 +343,10 @@ export class Vehicle {
 			for ( let i = 0; i < 4; i ++ ) {
 
 				const w = this.wheels[ i ];
-				const Tdrive = Td[ i ];
+				let Tdrive = Td[ i ];
+				// rally: a driver feathers the throttle, so the driven tyres hover around peak slip and keep pushing
+				// the car along the nose instead of going up in smoke
+				if ( arcade && Tdrive * w.kappa > 0 && Math.abs( vF ) > 9 ) Tdrive *= Math.max( 0.15, 1 - Math.max( 0, Math.abs( w.kappa ) / RALLY.kp - ( drive === 'rwd' ? RALLY.spinR : RALLY.spin ) ) * 0.7 );
 				let Tb = brake * ( w.front ? 1900 : 1100 );
 				if ( hand && ! w.front ) Tb += 4000;
 				if ( this.auto && throttle < 0.05 && Math.abs( vF ) < 0.4 && this.gear !== 0 ) Tb += 400; // hold
@@ -390,9 +396,11 @@ export class Vehicle {
 				let Fx = 0, Fy = 0;
 				if ( sl > 1e-6 ) {
 
-					const Fm = Fz * mu * Math.sin( TCx * Math.atan( TBx * sl ) );
-					Fx = Fm * sx / sl;
-					Fy = - Fm * sy / sl;
+					const tyre = x => Fz * mu * Math.sin( TCx * Math.atan( TBx * x ) );
+					Fx = tyre( sl ) * sx / sl;
+					// rally: side grip has priority, wheelspin eats less of it (but a locked handbrake wheel still lets go)
+					const c = arcade && ! ( hand && ! w.front ) ? ( drive === 'rwd' && ! w.front ? RALLY.combR : RALLY.comb ) : 1, slc = Math.hypot( sx * c, sy );
+					Fy = - tyre( slc ) * sy / slc;
 
 				}
 				const stop = Math.abs( vy ) * ( this.mass / 4 ) / dt * 0.8;
