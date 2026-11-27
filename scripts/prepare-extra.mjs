@@ -19,7 +19,9 @@ const chunkOfEN = ( E, N ) => [ Math.floor( ( E - GRID_E ) / CHUNK ), Math.floor
 
 // =============== textured buildings: crawl the I3S node pages once, keep the textured leaves ===============
 console.log( 'facades…' );
-try {
+const oldExtra = ( () => { try { return JSON.parse( readFileSync( OUT + '/extra.json', 'utf8' ) ); } catch { return null; } } )();
+if ( process.env.SKIP_FACADES && oldExtra ) { extra.facadeChunks = oldExtra.facadeChunks; console.log( 'facades reused', extra.facadeChunks.length ); }
+else try {
 
 	const U = 'https://tiles.arcgis.com/tiles/ZYGCYltwz5ExeoGm/arcgis/rest/services/hooned_lod2_tallinn_slpk/SceneServer/layers/0';
 	const leaves = [];
@@ -115,7 +117,9 @@ try {
 	let nid = new Float64Array( cap ), nx = new Float32Array( cap ), nz = new Float32Array( cap );
 	const nodeTags = []; // [index, tags]
 	const ways = [];
-	let cur = null, curTags = null, curType = 0;
+	const allWays = new Map(); // way id -> node refs (for multipolygon relations)
+	const rels = [];
+	let cur = null, curTags = null, curType = 0, curId = 0, members = null;
 	const attr = ( line, k ) => {
 
 		const i = line.indexOf( ' ' + k + '="' );
@@ -125,6 +129,8 @@ try {
 
 	};
 
+	const RAIL = /^(rail|tram|light_rail|narrow_gauge)$/;
+	const isWater = t => ( t.natural === 'water' || t.waterway === 'riverbank' || t.landuse === 'reservoir' || t.landuse === 'basin' || t.water ) && t.intermittent !== 'yes' && ! t.covered && ! t.tunnel && t.water !== 'wastewater';
 	const unesc = s => s.replace( /&quot;/g, '"' ).replace( /&apos;/g, "'" ).replace( /&lt;/g, '<' ).replace( /&gt;/g, '>' ).replace( /&amp;/g, '&' );
 	let pos = 0;
 	while ( pos < xml.length ) {
@@ -154,7 +160,20 @@ try {
 
 		} else if ( line.startsWith( '<way ' ) ) {
 
-			curType = 2; cur = []; curTags = {};
+			curType = 2; cur = []; curTags = {}; curId = + attr( line, 'id' );
+
+		} else if ( line.startsWith( '<relation ' ) ) {
+
+			curType = 3; curTags = {}; members = [];
+
+		} else if ( line.startsWith( '<member ' ) && members ) {
+
+			if ( attr( line, 'type' ) === 'way' ) members.push( [ + attr( line, 'ref' ), attr( line, 'role' ) ] );
+
+		} else if ( line === '</relation>' ) {
+
+			if ( curTags.type === 'multipolygon' && isWater( curTags ) ) rels.push( [ members, curTags ] );
+			curTags = null; members = null; curType = 0;
 
 		} else if ( line.startsWith( '<nd ' ) ) {
 
@@ -171,10 +190,11 @@ try {
 
 		} else if ( line === '</way>' ) {
 
-			if ( curTags.highway || curTags[ 'area:highway' ] || curTags.amenity === 'parking' || /^(fence|hedge|wall)$/.test( curTags.barrier || '' ) ) ways.push( [ cur, curTags ] );
+			if ( curTags.highway || curTags[ 'area:highway' ] || curTags.amenity === 'parking' || /^(fence|hedge|wall)$/.test( curTags.barrier || '' ) || RAIL.test( curTags.railway || '' ) || isWater( curTags ) ) ways.push( [ cur, curTags ] );
+			allWays.set( curId, cur );
 			curTags = null; curType = 0;
 
-		} else if ( line.startsWith( '<relation' ) ) break;
+		}
 
 	}
 
@@ -206,7 +226,7 @@ try {
 
 	};
 
-	console.log( 'nodes', nn, 'tagged', nodeTags.length, 'ways', ways.length );
+	console.log( 'nodes', nn, 'tagged', nodeTags.length, 'ways', ways.length, 'water relations', rels.length );
 
 	// ---- classify roads ----
 	const CAR = { motorway: [ 4, 3.6 ], trunk: [ 4, 3.5 ], primary: [ 4, 3.4 ], secondary: [ 2, 3.4 ], tertiary: [ 2, 3.3 ], unclassified: [ 2, 3.0 ], residential: [ 2, 3.0 ], living_street: [ 2, 2.8 ], service: [ 1, 4.0 ], road: [ 2, 3.0 ], busway: [ 2, 3.4 ] };
@@ -247,7 +267,11 @@ try {
 		const side = sw === 'both' || sw === 'yes' ? 3 : sw === 'left' ? 1 : sw === 'right' ? 2 : 0;
 		const surf = /paving|sett|cobble|stone|brick/.test( t.surface || '' ) ? 1 : /gravel|dirt|ground|compacted|sand|grass|fine/.test( t.surface || '' ) ? 2 : 0;
 		const ri = roads.length;
-		roads.push( { pts, kind, width, lanes, oneway: oneway ? 1 : 0, bridge: t.bridge && t.bridge !== 'no' ? 1 : 0, side, surf, hw } );
+		// forward lanes (to the right of the way direction) when tagged: the centre line is not always in the middle
+		const lf = parseInt( t[ 'lanes:forward' ] ) || 0, lb = parseInt( t[ 'lanes:backward' ] ) || 0;
+		const lanesF = ! oneway && lf > 0 && lb > 0 ? lf : 0;
+		if ( lanesF ) lanes = Math.max( lanes, lf + lb + ( parseInt( t[ 'lanes:both_ways' ] ) || 0 ) );
+		roads.push( { pts, kind, width, lanes, oneway: oneway ? 1 : 0, bridge: t.bridge && t.bridge !== 'no' ? 1 : 0, side, surf, hw, lanesF } );
 		if ( kind <= 3 ) pts.forEach( ( p, k ) => {
 
 			useCount[ p ] = Math.min( 255, useCount[ p ] + ( k === 0 || k === pts.length - 1 ? 1 : 2 ) );
@@ -334,42 +358,172 @@ try {
 
 	};
 
-	// bridges: straight decks from abutment to abutment (heights from the terrain at both ends)
-	let decks = 0;
+	// bridges: deck heights from Maa- ja Ruumiamet's 3D traffic structures (bridges.bin) where they exist,
+	// otherwise a straight deck from abutment to abutment that always clears the streets crossing under it
+	const BR = existsSync( OUT + '/bridges.bin' ) ? new Float32Array( readFileSync( OUT + '/bridges.bin' ).buffer.slice( 0 ) ) : new Float32Array( 0 );
+	const brGrid = new Map(), BC = 10;
+	for ( let t = 0; t + 9 <= BR.length; t += 9 ) {
+
+		const ax = BR[ t ], ay = BR[ t + 1 ], az = BR[ t + 2 ], bx = BR[ t + 3 ], by = BR[ t + 4 ], bz = BR[ t + 5 ], cx = BR[ t + 6 ], cy = BR[ t + 7 ], cz = BR[ t + 8 ];
+		const ny = ( bz - az ) * ( cx - ax ) - ( bx - ax ) * ( cz - az ), len = Math.hypot( ( by - ay ) * ( cz - az ) - ( bz - az ) * ( cy - ay ), ny, ( bx - ax ) * ( cy - ay ) - ( by - ay ) * ( cx - ax ) );
+		if ( ! len || Math.abs( ny / len ) < 0.6 ) continue; // only the flat tops
+		for ( let gx = Math.floor( Math.min( ax, bx, cx ) / BC ); gx <= Math.floor( Math.max( ax, bx, cx ) / BC ); gx ++ ) for ( let gz = Math.floor( Math.min( az, bz, cz ) / BC ); gz <= Math.floor( Math.max( az, bz, cz ) / BC ); gz ++ ) {
+
+			const k = gx + ',' + gz;
+			if ( ! brGrid.has( k ) ) brGrid.set( k, [] );
+			brGrid.get( k ).push( t );
+
+		}
+
+	}
+
+	// heights of the structure tops above (x, z)
+	const structTops = ( x, z ) => {
+
+		const out = [];
+		for ( const t of brGrid.get( Math.floor( x / BC ) + ',' + Math.floor( z / BC ) ) || [] ) {
+
+			const ax = BR[ t ], az = BR[ t + 2 ], bx = BR[ t + 3 ], bz = BR[ t + 5 ], cx = BR[ t + 6 ], cz = BR[ t + 8 ];
+			const d = ( bz - cz ) * ( ax - cx ) + ( cx - bx ) * ( az - cz );
+			if ( Math.abs( d ) < 1e-9 ) continue;
+			const u = ( ( bz - cz ) * ( x - cx ) + ( cx - bx ) * ( z - cz ) ) / d, v = ( ( cz - az ) * ( x - cx ) + ( ax - cx ) * ( z - cz ) ) / d, w = 1 - u - v;
+			if ( u < - 1e-4 || v < - 1e-4 || w < - 1e-4 ) continue;
+			out.push( u * BR[ t + 1 ] + v * BR[ t + 4 ] + w * BR[ t + 7 ] );
+
+		}
+
+		return out;
+
+	};
+
+	// car roads (not bridges) as segments, to find what passes under a bridge
+	const under = new Map();
+	roads.forEach( r => {
+
+		if ( r.bridge || r.kind > 3 ) return;
+		for ( let k = 0; k + 1 < r.pts.length; k ++ ) {
+
+			const a = r.pts[ k ], b = r.pts[ k + 1 ];
+			for ( let gx = Math.floor( Math.min( nx[ a ], nx[ b ] ) / 50 ); gx <= Math.floor( Math.max( nx[ a ], nx[ b ] ) / 50 ); gx ++ ) for ( let gz = Math.floor( Math.min( nz[ a ], nz[ b ] ) / 50 ); gz <= Math.floor( Math.max( nz[ a ], nz[ b ] ) / 50 ); gz ++ ) {
+
+				const key = gx + ',' + gz;
+				if ( ! under.has( key ) ) under.set( key, [] );
+				under.get( key ).push( a, b );
+
+			}
+
+		}
+
+	} );
+	const segX = ( ax, az, bx, bz, cx, cz, dx, dz ) => {
+
+		const d = ( bx - ax ) * ( dz - cz ) - ( bz - az ) * ( dx - cx );
+		if ( Math.abs( d ) < 1e-9 ) return null;
+		const t = ( ( cx - ax ) * ( dz - cz ) - ( cz - az ) * ( dx - cx ) ) / d, u = ( ( cx - ax ) * ( bz - az ) - ( cz - az ) * ( bx - ax ) ) / d;
+		return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? t : null;
+
+	};
+
+	let decks = 0, fromData = 0, raised = 0;
 	for ( const r of roads ) {
 
 		if ( ! r.bridge ) continue;
-		const P = r.pts, cum = [ 0 ];
-		for ( let k = 1; k < P.length; k ++ ) cum.push( cum[ k - 1 ] + Math.hypot( nx[ P[ k ] ] - nx[ P[ k - 1 ] ], nz[ P[ k ] ] - nz[ P[ k - 1 ] ] ) );
-		const L = cum[ cum.length - 1 ] || 1;
-		const hA = terrain( nx[ P[ 0 ] ], nz[ P[ 0 ] ] ), hB = terrain( nx[ P[ P.length - 1 ] ], nz[ P[ P.length - 1 ] ] );
-		const ys = P.map( ( p, k ) => {
+		const own = new Set( r.pts );
+		// resample the way every ~4 m so the deck can follow the real structure
+		const P = [];
+		for ( let k = 0; k + 1 < r.pts.length; k ++ ) {
 
-			const t = cum[ k ] / L;
-			return hA + ( hB - hA ) * t + Math.sin( Math.PI * t ) * Math.min( 0.8, L * 0.01 );
+			const ax = nx[ r.pts[ k ] ], az = nz[ r.pts[ k ] ], bx = nx[ r.pts[ k + 1 ] ], bz = nz[ r.pts[ k + 1 ] ];
+			const m = Math.max( 1, Math.ceil( Math.hypot( bx - ax, bz - az ) / 4 ) );
+			for ( let q = 0; q < m; q ++ ) P.push( [ ax + ( bx - ax ) * q / m, az + ( bz - az ) * q / m ] );
+
+		}
+
+		P.push( [ nx[ r.pts[ r.pts.length - 1 ] ], nz[ r.pts[ r.pts.length - 1 ] ] ] );
+		const cum = [ 0 ];
+		for ( let k = 1; k < P.length; k ++ ) cum.push( cum[ k - 1 ] + Math.hypot( P[ k ][ 0 ] - P[ k - 1 ][ 0 ], P[ k ][ 1 ] - P[ k - 1 ][ 1 ] ) );
+		const L = cum[ cum.length - 1 ] || 1;
+		const hA = terrain( P[ 0 ][ 0 ], P[ 0 ][ 1 ] ), hB = terrain( P[ P.length - 1 ][ 0 ], P[ P.length - 1 ][ 1 ] );
+		let ys = P.map( ( p, k ) => { const t = cum[ k ] / L; return hA + ( hB - hA ) * t + Math.sin( Math.PI * t ) * Math.min( 0.8, L * 0.01 ); } );
+		// real deck tops: the structure top closest to the straight estimate, above the ground
+		let hits = 0;
+		const real = P.map( ( [ x, z ], k ) => {
+
+			const g = terrain( x, z ), c = structTops( x, z ).filter( h => h > g + 0.5 );
+			if ( ! c.length ) return NaN;
+			hits ++;
+			return c.reduce( ( a, b ) => Math.abs( b - ys[ k ] ) < Math.abs( a - ys[ k ] ) ? b : a );
 
 		} );
+		if ( hits >= Math.max( 2, P.length * 0.3 ) ) {
+
+			fromData ++;
+			// fill the gaps (and the ends) by interpolating between known points, then smooth
+			const known = real.map( ( v, k ) => v === v ? k : - 1 ).filter( k => k >= 0 );
+			ys = ys.map( ( y, k ) => {
+
+				if ( real[ k ] === real[ k ] ) return real[ k ];
+				let a = - 1, b = - 1;
+				for ( const q of known ) { if ( q < k ) a = q; else if ( b < 0 ) b = q; }
+				if ( a < 0 ) return y + ( real[ b ] - ys[ b ] ) * Math.min( 1, cum[ k ] / Math.max( 1, cum[ b ] ) ); // ramp from the abutment
+				if ( b < 0 ) return y + ( real[ a ] - ys[ a ] ) * Math.min( 1, ( L - cum[ k ] ) / Math.max( 1, L - cum[ a ] ) );
+				return real[ a ] + ( real[ b ] - real[ a ] ) * ( cum[ k ] - cum[ a ] ) / ( cum[ b ] - cum[ a ] );
+
+			} );
+			for ( let pass = 0; pass < 2; pass ++ ) ys = ys.map( ( y, k ) => k === 0 || k === ys.length - 1 ? y : ( ys[ k - 1 ] + 2 * y + ys[ k + 1 ] ) / 4 );
+
+		}
+
+		// streets crossing under the deck need ~5 m of headroom
+		for ( let k = 0; k + 1 < P.length; k ++ ) {
+
+			const [ ax, az ] = P[ k ], [ bx, bz ] = P[ k + 1 ];
+			const seen = new Set();
+			for ( const key of [ Math.floor( ax / 50 ) + ',' + Math.floor( az / 50 ), Math.floor( bx / 50 ) + ',' + Math.floor( bz / 50 ) ] ) {
+
+				const S = under.get( key );
+				if ( ! S || seen.has( key ) ) continue;
+				seen.add( key );
+				for ( let q = 0; q < S.length; q += 2 ) {
+
+					if ( own.has( S[ q ] ) || own.has( S[ q + 1 ] ) ) continue; // a street joining the bridge, not under it
+					const t = segX( ax, az, bx, bz, nx[ S[ q ] ], nz[ S[ q ] ], nx[ S[ q + 1 ] ], nz[ S[ q + 1 ] ] );
+					if ( t === null ) continue;
+					const x = ax + ( bx - ax ) * t, z = az + ( bz - az ) * t, need = terrain( x, z ) + 5.2;
+					const s0 = cum[ k ] + ( cum[ k + 1 ] - cum[ k ] ) * t, have = ys[ k ] + ( ys[ k + 1 ] - ys[ k ] ) * t;
+					if ( have >= need || s0 < 6 || s0 > L - 6 ) continue;
+					raised ++;
+					const span = Math.min( 40, Math.max( 12, Math.min( s0, L - s0 ) ) );
+					ys = ys.map( ( y, i ) => { const d = Math.abs( cum[ i ] - s0 ); return d >= span ? y : Math.max( y, y + ( need - have ) * 0.5 * ( 1 + Math.cos( Math.PI * d / span ) ) ); } );
+
+				}
+
+			}
+
+		}
+
 		let piece = null, pkey = null;
 		for ( let k = 0; k + 1 < P.length; k ++ ) {
 
-			const mx = ( nx[ P[ k ] ] + nx[ P[ k + 1 ] ] ) / 2, mz = ( nz[ P[ k ] ] + nz[ P[ k + 1 ] ] ) / 2;
+			const mx = ( P[ k ][ 0 ] + P[ k + 1 ][ 0 ] ) / 2, mz = ( P[ k ][ 1 ] + P[ k + 1 ][ 1 ] ) / 2;
 			if ( ! inside( mx, mz ) ) { piece = null; continue; }
 			const c = C( mx, mz );
 			if ( c !== pkey || ! piece ) {
 
-				piece = [ r.kind, r2( r.width ), r.lanes, r.oneway, [ r2( nx[ P[ k ] ] ), r2( nz[ P[ k ] ] ), r2( ys[ k ] ) ] ];
+				piece = [ r.kind, r2( r.width ), r.lanes, r.oneway, [ r2( P[ k ][ 0 ] ), r2( P[ k ][ 1 ] ), r2( ys[ k ] ) ] ];
 				( c.d || ( c.d = [] ) ).push( piece );
 				pkey = c;
 				decks ++;
 
 			}
 
-			piece[ 4 ].push( r2( nx[ P[ k + 1 ] ] ), r2( nz[ P[ k + 1 ] ] ), r2( ys[ k + 1 ] ) );
+			piece[ 4 ].push( r2( P[ k + 1 ][ 0 ] ), r2( P[ k + 1 ][ 1 ] ), r2( ys[ k + 1 ] ) );
 
 		}
 
 	}
 
+	console.log( 'bridges from the 3D structures', fromData, 'raised over streets', raised );
 	console.log( 'bridge deck pieces', decks );
 
 	for ( const r of roads ) {
@@ -384,7 +538,7 @@ try {
 			const c = C( mx, mz );
 			if ( c !== pkey || ! piece ) {
 
-				piece = [ r.kind, r2( r.width ), r.lanes, r.oneway, r.bridge, r.side, r.surf, [ r2( nx[ a ] ), r2( nz[ a ] ) ] ];
+				piece = [ r.kind, r2( r.width ), r.lanes, r.oneway, r.bridge, r.side, r.surf, [ r2( nx[ a ] ), r2( nz[ a ] ) ], r.lanesF ];
 				c.w.push( piece );
 				pkey = c;
 
@@ -659,7 +813,7 @@ try {
 			const o = 4 + i * 8;
 			const x = e0 + dv.getUint16( o, true ) / 100 - OE, z = - ( n0 + dv.getUint16( o + 2, true ) / 100 - ON );
 			const rd = nearestRoad( x, z, 15 );
-			if ( rd && rd.r.kind <= 2 && rd.d < rd.r.width / 2 + 0.4 ) { removed ++; continue; }
+			if ( rd && rd.r.kind <= 3 && rd.d < rd.r.width / 2 + 0.9 ) { removed ++; continue; }
 			keep.push( i );
 			kept ++;
 
@@ -674,6 +828,138 @@ try {
 	}
 
 	console.log( 'trees on roads removed', removed, 'kept', kept );
+
+	// railways and tram lines (not in tunnels, not on bridges): gauge and centre line per chunk
+	let railPieces = 0;
+	for ( const [ refs, t ] of ways ) {
+
+		if ( ! RAIL.test( t.railway || '' ) || ( t.tunnel && t.tunnel !== 'no' ) || ( t.bridge && t.bridge !== 'no' ) ) continue;
+		const pts = refs.map( find );
+		if ( pts.some( i => i < 0 ) || pts.length < 2 ) continue;
+		const gauge = ( parseInt( t.gauge ) || ( t.railway === 'tram' ? 1067 : 1520 ) ) / 1000;
+		const street = t.railway === 'tram' ? 1 : 0;
+		let piece = null, pkey = null;
+		for ( let k = 0; k + 1 < pts.length; k ++ ) {
+
+			const a = pts[ k ], b = pts[ k + 1 ], mx = ( nx[ a ] + nx[ b ] ) / 2, mz = ( nz[ a ] + nz[ b ] ) / 2;
+			if ( ! inside( mx, mz ) ) { piece = null; continue; }
+			const c = C( mx, mz );
+			if ( c !== pkey || ! piece ) {
+
+				piece = [ r2( gauge ), street, r2( nx[ a ] ), r2( nz[ a ] ) ];
+				( c.r || ( c.r = [] ) ).push( piece );
+				pkey = c;
+				railPieces ++;
+
+			}
+
+			piece.push( r2( nx[ b ] ), r2( nz[ b ] ) );
+
+		}
+
+	}
+
+	console.log( 'rail pieces', railPieces );
+
+	// water: lakes, ponds, rivers, harbour basins (ways and multipolygon relations), clipped to the chunks.
+	// The level is the median ground height inside (the terrain model is flat over water).
+	const waterPolys = [];
+	for ( const [ refs, t ] of ways ) if ( isWater( t ) && refs.length > 3 && refs[ 0 ] === refs[ refs.length - 1 ] ) waterPolys.push( [ refs ] );
+	const joinRings = list => {
+
+		// join member ways end to end into closed rings
+		const segs = list.map( r => r.slice() ), rings = [];
+		while ( segs.length ) {
+
+			let ring = segs.shift();
+			let guard = 0;
+			while ( ring[ 0 ] !== ring[ ring.length - 1 ] && guard ++ < 5000 ) {
+
+				const end = ring[ ring.length - 1 ];
+				const i = segs.findIndex( s => s[ 0 ] === end || s[ s.length - 1 ] === end );
+				if ( i < 0 ) break;
+				const s = segs.splice( i, 1 )[ 0 ];
+				ring = ring.concat( ( s[ 0 ] === end ? s : s.reverse() ).slice( 1 ) );
+
+			}
+
+			if ( ring.length > 3 && ring[ 0 ] === ring[ ring.length - 1 ] ) rings.push( ring );
+
+		}
+
+		return rings;
+
+	};
+
+	for ( const [ members ] of rels ) {
+
+		const outer = [], inner = [];
+		for ( const [ id, role ] of members ) { const w = allWays.get( id ); if ( w ) ( role === 'inner' ? inner : outer ).push( w ); }
+		const rings = [ ...joinRings( outer ), ...joinRings( inner ) ];
+		if ( rings.length ) waterPolys.push( rings );
+
+	}
+
+	const clip = ( ring, x0, z0, x1, z1 ) => {
+
+		// Sutherland-Hodgman against the four sides of the chunk box
+		let pts = ring;
+		const edges = [ [ p => p[ 0 ] >= x0, ( a, b ) => [ x0, a[ 1 ] + ( b[ 1 ] - a[ 1 ] ) * ( x0 - a[ 0 ] ) / ( b[ 0 ] - a[ 0 ] ) ] ],
+			[ p => p[ 0 ] <= x1, ( a, b ) => [ x1, a[ 1 ] + ( b[ 1 ] - a[ 1 ] ) * ( x1 - a[ 0 ] ) / ( b[ 0 ] - a[ 0 ] ) ] ],
+			[ p => p[ 1 ] >= z0, ( a, b ) => [ a[ 0 ] + ( b[ 0 ] - a[ 0 ] ) * ( z0 - a[ 1 ] ) / ( b[ 1 ] - a[ 1 ] ), z0 ] ],
+			[ p => p[ 1 ] <= z1, ( a, b ) => [ a[ 0 ] + ( b[ 0 ] - a[ 0 ] ) * ( z1 - a[ 1 ] ) / ( b[ 1 ] - a[ 1 ] ), z1 ] ] ];
+		for ( const [ ins, cut ] of edges ) {
+
+			const out = [];
+			for ( let i = 0; i < pts.length; i ++ ) {
+
+				const a = pts[ ( i + pts.length - 1 ) % pts.length ], b = pts[ i ];
+				if ( ins( b ) ) { if ( ! ins( a ) ) out.push( cut( a, b ) ); out.push( b ); } else if ( ins( a ) ) out.push( cut( a, b ) );
+
+			}
+
+			pts = out;
+			if ( pts.length < 3 ) return null;
+
+		}
+
+		return pts;
+
+	};
+
+	let waterPieces = 0;
+	for ( const rings of waterPolys ) {
+
+		const R = rings.map( r => r.map( find ) ).filter( r => r.every( i => i >= 0 ) ).map( r => r.slice( 0, - 1 ).map( i => [ nx[ i ], nz[ i ] ] ) );
+		if ( ! R.length ) continue;
+		let x0 = 1e9, x1 = - 1e9, z0 = 1e9, z1 = - 1e9;
+		for ( const [ x, z ] of R[ 0 ] ) { x0 = Math.min( x0, x ); x1 = Math.max( x1, x ); z0 = Math.min( z0, z ); z1 = Math.max( z1, z ); }
+		if ( ( x1 - x0 ) * ( z1 - z0 ) < 40 ) continue; // garden ponds
+		// level: median terrain at points inside the outer ring
+		const inPoly = ( x, z ) => { let c = false; for ( const r of R ) for ( let a = 0, b = r.length - 1; a < r.length; b = a ++ ) if ( ( r[ a ][ 1 ] > z ) !== ( r[ b ][ 1 ] > z ) && x < ( r[ b ][ 0 ] - r[ a ][ 0 ] ) * ( z - r[ a ][ 1 ] ) / ( r[ b ][ 1 ] - r[ a ][ 1 ] ) + r[ a ][ 0 ] ) c = ! c; return c; };
+		const hs = [], st = Math.max( 2, Math.sqrt( ( x1 - x0 ) * ( z1 - z0 ) / 400 ) );
+		for ( let x = x0 + st / 2; x < x1; x += st ) for ( let z = z0 + st / 2; z < z1; z += st ) if ( inPoly( x, z ) ) hs.push( terrain( x, z ) );
+		if ( ! hs.length ) continue;
+		hs.sort( ( a, b ) => a - b );
+		const level = r2( hs[ Math.floor( hs.length * 0.4 ) ] );
+		const [ ca, cb ] = chunkOfEN( x0 + OE, - z1 + ON ), [ cc, cd ] = chunkOfEN( x1 + OE, - z0 + ON );
+		for ( let cx = ca; cx <= cc; cx ++ ) for ( let cy = cb; cy <= cd; cy ++ ) {
+
+			const e0 = GRID_E + cx * CHUNK, n0 = GRID_N + cy * CHUNK;
+			const bx0 = e0 - OE - 2, bx1 = e0 + CHUNK - OE + 2, bz0 = - ( n0 + CHUNK - ON ) - 2, bz1 = - ( n0 - ON ) + 2;
+			const parts = R.map( r => clip( r, bx0, bz0, bx1, bz1 ) ).filter( Boolean );
+			if ( ! parts.length ) continue;
+			const mx = ( bx0 + bx1 ) / 2, mz = ( bz0 + bz1 ) / 2;
+			if ( ! inside( mx, mz ) ) continue;
+			const c = C( mx, mz );
+			( c.wt || ( c.wt = [] ) ).push( [ level, ...parts.map( p => p.flatMap( q => [ r2( q[ 0 ] ), r2( q[ 1 ] ) ] ) ) ] );
+			waterPieces ++;
+
+		}
+
+	}
+
+	console.log( 'water polygons', waterPolys.length, 'pieces', waterPieces );
 
 	for ( const [ key, c ] of chunks ) {
 

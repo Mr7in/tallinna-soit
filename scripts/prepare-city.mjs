@@ -183,23 +183,22 @@ for ( let t = 0; t < B.nt; t ++ ) {
 
 }
 
-const remap = new Int32Array( B.nv ).fill( - 1 );
-const vBld = new Int32Array( B.nv );
-for ( let t = 0; t < B.nt; t ++ ) for ( let k = 0; k < 3; k ++ ) vBld[ B.tri[ t * 3 + k ] ] = B.triB[ t ];
 const chunks = [];
 let bytes = 0;
 for ( const [ key, list ] of byChunk ) {
 
 	const [ cx, cy ] = key.split( '_' ).map( Number );
 	const e0 = GRID_E + cx * CHUNK, n0 = GRID_N + cy * CHUNK;
-	const used = [];
+	// a vertex shared by two buildings is written once per building, so each keeps its own base / eave heights
+	const used = [], usedB = [], seen = new Map();
 	const idx = new Uint32Array( list.length * 3 );
 	let w = 0;
 	for ( const t of list ) for ( let k = 0; k < 3; k ++ ) {
 
-		const v = B.tri[ t * 3 + k ];
-		if ( remap[ v ] < 0 ) { remap[ v ] = used.length; used.push( v ); }
-		idx[ w ++ ] = remap[ v ];
+		const v = B.tri[ t * 3 + k ], b = B.triB[ t ], key = v * 65536 + ( b % 65536 );
+		let i = seen.get( key );
+		if ( i === undefined ) { i = used.length; seen.set( key, i ); used.push( v ); usedB.push( b ); }
+		idx[ w ++ ] = i;
 
 	}
 
@@ -208,13 +207,12 @@ for ( const [ key, list ] of byChunk ) {
 	const aq = new Int16Array( n * 2 );
 	for ( let i = 0; i < n; i ++ ) {
 
-		const v = used[ i ], b = vBld[ v ];
+		const v = used[ i ], b = usedB[ i ];
 		pq[ i * 3 ] = Math.round( ( B.vE[ v ] - e0 ) * 10 );
 		pq[ i * 3 + 1 ] = Math.round( B.vH[ v ] * 10 );
 		pq[ i * 3 + 2 ] = Math.round( ( B.vN[ v ] - n0 ) * 10 );
 		aq[ i * 2 ] = Math.round( bMin[ b ] * 10 );
 		aq[ i * 2 + 1 ] = Math.round( bEave[ b ] * 10 );
-		remap[ v ] = - 1;
 
 	}
 

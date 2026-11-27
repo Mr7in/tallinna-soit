@@ -128,6 +128,7 @@ export class Foliage {
 			if ( ! T || c.treesLod < 0 ) continue;
 			for ( let i = 0; i < T.n; i ++ ) {
 
+				if ( T.gone[ i ] ) continue;
 				const ex = T.x[ i ] - x, ez = T.z[ i ] - z, d2 = ex * ex + ez * ez;
 				if ( d2 < R2 ) cand.push( { d2, T, i } );
 

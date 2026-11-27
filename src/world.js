@@ -157,17 +157,22 @@ function buildingMaterial() {
 	m.onBeforeCompile = s => {
 
 		s.vertexShader = s.vertexShader
-			.replace( '#include <common>', '#include <common>\nattribute vec2 aBT;\nvarying vec3 vWPos;\nvarying vec2 vBT;' )
-			.replace( '#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\nvBT = aBT;' );
+			// flat: a vertex shared by two buildings must not blend their heights (that hashed into per-pixel speckles)
+			.replace( '#include <common>', '#include <common>\nattribute vec2 aBT;\nvarying vec3 vWPos;\nflat varying vec2 vBT;' )
+			.replace( '#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\nvBT = aBT;' )
+;
 		s.fragmentShader = s.fragmentShader
 			.replace( '#include <common>', `#include <common>
 				varying vec3 vWPos;
-				varying vec2 vBT;
+				flat varying vec2 vBT;
 				float gRoof; vec3 gPhoto; float gGlass;
 				float h1( float n ) { return fract( sin( n * 12.9898 ) * 43758.5453 ); }
-				float box( vec2 p, vec2 lo, vec2 hi ) { vec2 a = smoothstep( lo, lo + 0.03, p ) * smoothstep( hi, hi - 0.03, p ); return a.x * a.y; }` )
+				float gAA = 0.03;
+				float box( vec2 p, vec2 lo, vec2 hi ) { vec2 a = smoothstep( lo - gAA * 0.5, lo + gAA * 0.5, p ) * smoothstep( hi + gAA * 0.5, hi - gAA * 0.5, p ); return a.x * a.y; }` )
 			.replace( '#include <map_fragment>', `
-				vec3 wN = normalize( cross( dFdx( vWPos ), dFdy( vWPos ) ) );
+				// face normal from the view-space position (small numbers: stable), turned into world space
+				vec3 vN = normalize( cross( dFdx( vViewPosition ), dFdy( vViewPosition ) ) );
+				vec3 wN = normalize( ( vec4( vN, 0.0 ) * viewMatrix ).xyz );
 				gRoof = smoothstep( 0.35, 0.6, abs( wN.y ) );
 				gPhoto = texture2D( map, vMapUv ).rgb;
 				float H = vBT.y - vBT.x;
@@ -193,11 +198,19 @@ function buildingMaterial() {
 				}
 				vec2 cell = vec2( fract( u / pitch ), fract( y / floorH ) );
 				float fl = floor( y / floorH );
-				float win = box( cell, wlo, whi );
-				// far away the window grid turns into noise: fade it to its average coverage
+				// far away the window grid turns into noise: edges get wider with distance, then it fades to its average
 				float fw = max( fwidth( u / pitch ), fwidth( y / floorH ) );
-				win = mix( win, ( whi.x - wlo.x ) * ( whi.y - wlo.y ), smoothstep( 0.06, 0.22, fw ) );
+				gAA = max( 0.012, fw * 1.2 );
+				float win = box( cell, wlo, whi );
+				float far = smoothstep( 0.05, 0.2, fw );
+				// window frames, sills and glazing bars (only where there is room on screen to see them)
+				float frame = ( box( cell, wlo - vec2( 0.035, 0.03 ), whi + vec2( 0.035, 0.03 ) ) - win ) * ( 1.0 - far );
+				float sill = box( cell, vec2( wlo.x - 0.05, wlo.y - 0.065 ), vec2( whi.x + 0.05, wlo.y - 0.03 ) ) * ( 1.0 - far );
+				float bars = gGlass > 0.5 ? 0.0 : ( 1.0 - far ) * win * max( 1.0 - smoothstep( 0.0, gAA + 0.012, abs( cell.x - ( wlo.x + whi.x ) * 0.5 ) ), 1.0 - smoothstep( 0.0, gAA + 0.012, abs( cell.y - mix( wlo.y, whi.y, 0.62 ) ) ) );
+				win = mix( win, ( whi.x - wlo.x ) * ( whi.y - wlo.y ), far );
+				float wmask = step( 0.6, y ) * step( y, H - 0.6 ) * ( 1.0 - gRoof ) * step( 0.5, fl );
 				win *= step( 0.6, y ) * step( y, H - 0.6 ) * ( 1.0 - gRoof );
+				frame *= wmask; sill *= wmask; bars *= wmask;
 				// ground floor: shop windows on bigger buildings, a darker plinth otherwise
 				if ( fl < 0.5 && H > 9.0 && H < 55.0 ) {
 					float shop = step( 0.5, h1( floor( u / 7.0 ) + seed * 31.0 ) );
@@ -210,7 +223,13 @@ function buildingMaterial() {
 				wall *= 0.93 + 0.07 * smoothstep( 0.0, 1.0, fract( u / 23.0 + seed ) ); // gentle variation along the facade
 				wall *= mix( 0.72, 1.0, smoothstep( 0.0, 0.9, y ) );         // dark plinth / dirt
 				wall *= mix( 1.0, 1.12, smoothstep( H - 0.5, H - 0.1, y ) ); // parapet edge
+				// glass: darker at the top (eaves), a soft sky reflection, now and then a curtain
+				glass *= 0.85 + 0.3 * smoothstep( wlo.y, whi.y, cell.y );
+				glass = mix( glass, vec3( 0.86, 0.84, 0.78 ) * 0.55, step( 0.88, h1( floor( u / pitch ) * 5.3 + fl * 2.9 + seed * 7.0 ) ) * 0.6 * step( mix( wlo.y, whi.y, 0.55 ), cell.y ) );
 				vec3 col = mix( wall, glass, win );
+				col = mix( col, mix( wall, vec3( 0.93, 0.92, 0.88 ), 0.75 ), frame * ( gGlass > 0.5 ? 0.0 : 1.0 ) );
+				col = mix( col, wall * 1.12, sill * ( gGlass > 0.5 ? 0.0 : 1.0 ) );
+				col = mix( col, vec3( 0.88, 0.87, 0.83 ), bars * 0.8 );
 				diffuseColor.rgb = mix( col, vec3( 0.0 ), gRoof );
 				gGlass = max( gGlass, win );
 			` )
@@ -356,7 +375,13 @@ export class World {
 	visGround( x, z ) {
 
 		const h = this.height( x, z ) - GROUND_SINK;
-		return h;
+		// under water the ground drops away, so the water surface always shows; only well inside the water
+		// does it drop deep (the ground mesh is coarse: a deep drop at the shore would show as a trench)
+		const R = this.roads;
+		const wl = R ? R.waterLevel( x, z ) : null;
+		if ( wl === null ) return h;
+		const deep = R.waterLevel( x + 4, z ) !== null && R.waterLevel( x - 4, z ) !== null && R.waterLevel( x, z + 4 ) !== null && R.waterLevel( x, z - 4 ) !== null;
+		return Math.min( h, wl - ( deep ? 1.5 : 0.12 ) );
 
 	}
 
@@ -367,11 +392,13 @@ export class World {
 
 			const d = this.roads.deckY( x, z, yRef );
 			if ( d !== null ) return d;
-			if ( this.roads.surface( x, z ) ) return this.heightSmooth( x, z ) + 0.065;
+			if ( this.roads.surface( x, z ) ) return this.heightSmooth( x, z ) + 0.065 + this.roads.railBump( x, z );
+			const wl = this.roads.waterLevel( x, z );
+			if ( wl !== null ) return Math.min( this.height( x, z ), wl - 4 ); // deep enough to drown in
 
 		}
 
-		return this.height( x, z ) - 0.03;
+		return this.height( x, z ) - 0.07;
 
 	}
 
@@ -463,7 +490,7 @@ export class World {
 		const e0 = gridE + cx * chunk, n0 = gridN + cy * chunk;
 		const c = { cx, cy, e0, n0, alive: true, loaded: false, texZ: 0, texBusy: false, ground: null, bld: null, trees: null, treesLod: - 1 };
 		c.rect = { e0: e0 - 125, n0: n0 - 125, size: chunk + 250 };
-		c.material = groundMaterial( 0 );
+		c.material = groundMaterial( 1 ); // pushed back a little: the sharp photo patches win over it
 		c.bmat = buildingMaterial();
 		const key = cx + '_' + cy;
 		const [ tx, ty ] = this.tileKey( e0 + 1, n0 + 1 );
@@ -558,7 +585,7 @@ export class World {
 
 		const dv = new DataView( buf );
 		const n = dv.getUint32( 0, true );
-		const T = { n, x: new Float32Array( n ), z: new Float32Array( n ), y: new Float32Array( n ), h: new Float32Array( n ), cr: new Float32Array( n ), conif: new Uint8Array( n ), fallen: new Uint8Array( n ) };
+		const T = { n, x: new Float32Array( n ), z: new Float32Array( n ), y: new Float32Array( n ), h: new Float32Array( n ), cr: new Float32Array( n ), conif: new Uint8Array( n ), fallen: new Uint8Array( n ), gone: new Uint8Array( n ) };
 		const ox = c.e0 - ORIGIN_E, oz = - ( c.n0 - ORIGIN_N );
 		for ( let i = 0; i < n; i ++ ) {
 
@@ -573,11 +600,34 @@ export class World {
 		}
 
 		c.treeData = T;
+		this.cullTrees( c );
+
+	}
+
+	// lidar trees standing on a street or a car park (mapping noise, overhanging crowns) are removed
+	cullTrees( c ) {
+
+		const T = c.treeData;
+		if ( ! T || ! this.roads ) return;
+		const r = this.roads.chunks.get( c.cx + '_' + c.cy );
+		if ( ! r || ! r.surf || c.culled ) return;
+		c.culled = true;
+		let n = 0;
+		for ( let i = 0; i < T.n; i ++ ) {
+
+			const s = this.roads.surface( T.x[ i ], T.z[ i ] );
+			if ( s === 1 || s === 4 ) { T.gone[ i ] = 1; n ++; }
+
+		}
+
+		if ( n && c.trees ) this.buildTrees( c, c.treesLod );
+		if ( n ) this.foliage.last = null;
 
 	}
 
 	treeMatrices( T, i, m, part, fall ) {
 
+		if ( T.gone[ i ] ) return m.makeScale( 0, 0, 0 );
 		const h = T.h[ i ], cr = T.cr[ i ], bush = h < BUSH;
 		const pos = new THREE.Vector3( T.x[ i ], T.y[ i ], T.z[ i ] );
 		const q = new THREE.Quaternion();
@@ -661,7 +711,7 @@ export class World {
 			if ( ! T ) continue;
 			for ( let i = 0; i < T.n; i ++ ) {
 
-				if ( T.fallen[ i ] || T.h[ i ] < BUSH ) continue;
+				if ( T.fallen[ i ] || T.gone[ i ] || T.h[ i ] < BUSH ) continue;
 				const ddx = T.x[ i ] - x, ddz = T.z[ i ] - z;
 				if ( ddx * ddx + ddz * ddz < r * r ) out.push( { c, i, x: T.x[ i ], z: T.z[ i ], y: T.y[ i ], h: T.h[ i ], r: Math.min( 0.45, 0.12 + T.h[ i ] * 0.012 ) } );
 
@@ -683,7 +733,7 @@ export class World {
 		if ( ! T ) return 0;
 		for ( let i = 0; i < T.n; i ++ ) {
 
-			if ( T.h[ i ] >= BUSH ) continue;
+			if ( T.h[ i ] >= BUSH || T.gone[ i ] ) continue;
 			const r = Math.max( T.h[ i ] * 0.55, T.cr[ i ] * 0.5 );
 			const ddx = T.x[ i ] - x, ddz = T.z[ i ] - z;
 			if ( ddx * ddx + ddz * ddz < r * r ) return 1;
@@ -784,7 +834,7 @@ export class World {
 
 					const k = j * n + i;
 					const wx = e0 + i * step - ORIGIN_E, wz = - ( n0 + tileM - j * step - ORIGIN_N );
-					pos.setXYZ( k, wx, this.visGround( wx, wz ) + 0.02, wz );
+					pos.setXYZ( k, wx, this.visGround( wx, wz ) + 0.03, wz );
 					uv.setXY( k, i / ( n - 1 ), 1 - j / ( n - 1 ) );
 
 				}
@@ -793,10 +843,11 @@ export class World {
 				tex.colorSpace = THREE.SRGBColorSpace;
 				tex.anisotropy = 8;
 				tex.needsUpdate = true;
-				const mat = groundMaterial( - 2 );
+				// no negative polygon offset here: at low camera angles it pulled the ground over the wheels
+				const mat = groundMaterial( 0 );
 				mat.map = tex;
 				p.mesh = new THREE.Mesh( g, mat );
-				p.mesh.userData.lift = 0.02;
+				p.mesh.userData.lift = 0.03;
 				p.mesh.renderOrder = 1;
 				this.group.add( p.mesh );
 

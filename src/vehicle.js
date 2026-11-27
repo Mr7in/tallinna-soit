@@ -38,11 +38,11 @@ export const IDLE = 850, REDLINE = 7200, LIMIT = 7500;
 // axle = distance of the front / rear axle from the centre of mass (front-heavy cars sit closer to the front axle)
 export const CAR_SPECS = [
 	{ id: 'rally', name: 'Subaru Impreza 22B', drive: 'awd', split: 0.36, mass: 1270, axle: [ 1.06, - 1.46 ], track: 0.753, r: 0.3, turbo: true, redline: 7900, limit: 8100, final: 4.444, gears: [ 3.083, 2.062, 1.545, 1.151, 0.825 ],
-		curve: [ [ 800, 140 ], [ 2000, 230 ], [ 2800, 330 ], [ 3200, 363 ], [ 4500, 360 ], [ 6000, 328 ], [ 7000, 285 ], [ 8100, 215 ] ], hp: 280, grip: 1.04, lsd: 0.5 },
+		curve: [ [ 800, 140 ], [ 2000, 230 ], [ 2800, 330 ], [ 3200, 363 ], [ 4500, 360 ], [ 6000, 328 ], [ 7000, 285 ], [ 8100, 215 ] ], hp: 280, grip: 1.04, lsd: 0.5, cda: 0.4 },
 	{ id: 'touring', name: 'Volvo 850 T-5R', drive: 'fwd', split: 1, mass: 1451, axle: [ 1.02, - 1.64 ], track: 0.735, r: 0.299, turbo: true, redline: 6500, limit: 6700, final: 4.0, gears: [ 3.07, 1.77, 1.19, 0.87, 0.7 ],
-		curve: [ [ 800, 160 ], [ 1500, 250 ], [ 2100, 330 ], [ 4000, 330 ], [ 5000, 320 ], [ 5600, 307 ], [ 6200, 275 ], [ 6700, 235 ] ], hp: 240, grip: 0.98, lsd: 0 },
-	{ id: 'coupe', name: 'BMW M3 E30', drive: 'rwd', split: 0, mass: 1200, axle: [ 1.26, - 1.31 ], track: 0.718, r: 0.303, turbo: false, redline: 7250, limit: 7400, final: 4.1, gears: [ 3.72, 2.4, 1.77, 1.26, 1.0 ],
-		curve: [ [ 800, 130 ], [ 2500, 185 ], [ 3500, 205 ], [ 4750, 230 ], [ 6000, 218 ], [ 6750, 202 ], [ 7400, 175 ] ], hp: 195, grip: 1.0, lsd: 0.25 },
+		curve: [ [ 800, 160 ], [ 1500, 250 ], [ 2100, 330 ], [ 4000, 330 ], [ 5000, 320 ], [ 5600, 307 ], [ 6200, 275 ], [ 6700, 235 ] ], hp: 240, grip: 0.98, lsd: 0, cda: 0.43 },
+	{ id: 'coupe', name: 'BMW M3 E30', drive: 'rwd', split: 0, mass: 1200, axle: [ 1.26, - 1.31 ], track: 0.718, r: 0.303, turbo: false, redline: 7250, limit: 7400, final: 3.25, gears: [ 3.72, 2.4, 1.77, 1.26, 1.0 ],
+		curve: [ [ 800, 130 ], [ 2500, 185 ], [ 3500, 205 ], [ 4750, 230 ], [ 6000, 218 ], [ 6750, 202 ], [ 7400, 175 ] ], hp: 195, grip: 1.0, lsd: 0.25, cda: 0.38 },
 ];
 const GRIP = [ 0.58, 1.0, 0.92, 0.64, 0.85 ]; // off-road, asphalt, paving, gravel, cobbles
 
@@ -139,7 +139,7 @@ export class Vehicle {
 		this.trees = this.world.treesNear( this.pos.x, this.pos.z, 7, this.trees || [] );
 		if ( this.world.inBush( this.pos.x, this.pos.z ) ) this.vel.multiplyScalar( 1 - Math.min( 0.5, 1.2 * dt ) );
 
-		const n = Math.min( 10, Math.max( 1, Math.ceil( dt / ( 1 / 240 ) ) ) );
+		const n = Math.min( 24, Math.max( 1, Math.ceil( dt / ( 1 / 240 ) ) ) );
 		for ( let i = 0; i < n; i ++ ) this.step( dt / n, input );
 
 	}
@@ -182,10 +182,9 @@ export class Vehicle {
 		let steerTarget;
 		if ( this.mode === 'arcade' ) {
 
-			// arcade: quicker steering plus automatic counter-steer so slides are easy to hold
-			const vL = this.vel.dot( left ), beta = Math.abs( vF ) > 3 ? Math.atan2( vL, Math.abs( vF ) ) : 0;
-			this.beta = beta;
-			steerTarget = Math.max( - 0.8, Math.min( 0.8, inp.steer * 0.62 / ( 1 + Math.abs( vF ) / 45 ) + Math.max( - 0.6, Math.min( 0.6, beta ) ) * ( this.drifting ? 0.55 : 0.85 ) * ( vF >= 0 ? 1 : - 1 ) ) );
+			// arcade: the front wheels show the stick, plus the counter-steer a driver would hold in a slide
+			const sl = this.slip || 0;
+			steerTarget = Math.max( - 0.75, Math.min( 0.75, inp.steer * 0.6 / ( 1 + Math.abs( vF ) / 30 ) - ( this.drifting ? sl * 0.55 : 0 ) ) );
 
 		} else steerTarget = inp.steer * 0.6 / ( 1 + Math.abs( vF ) / 32 );
 
@@ -214,7 +213,7 @@ export class Vehicle {
 			// turbo: boost builds with revs and throttle, with a bit of lag
 			const want = S.turbo && throttle > 0.25 && this.rpm > 2200 ? Math.min( 1, ( this.rpm - 2200 ) / 2300 ) * throttle : 0;
 			this.boost += ( want - this.boost ) * Math.min( 1, dt * ( want > this.boost ? 1.4 * this.rpm / 4000 : 5 ) );
-			Te = engineTorque( S.curve, this.rpm ) * throttle * ( S.turbo ? 0.62 + 0.38 * this.boost : 1 ) * ( arcade ? 1.2 : 1 );
+			Te = engineTorque( S.curve, this.rpm ) * throttle * ( S.turbo ? 0.62 + 0.38 * this.boost : 1 );
 			if ( ! slipping && throttle < 0.05 ) Te -= 35 + this.rpm * 0.008; // engine braking
 			if ( this.rpm > this.limit ) Te = Math.min( Te, 0 );
 			if ( this.shiftT > 0 ) Te = 0;
@@ -297,127 +296,106 @@ export class Vehicle {
 
 		}
 
-		const I = 1.3, R = this.radius;
-		// drivetrain: centre diff 41/59 with a limited-slip coupling, limited-slip front and rear diffs.
-		// The handbrake opens the centre coupling, so the front axle takes all the drive.
-		const W = this.wheels, Td = this._td || ( this._td = [ 0, 0, 0, 0 ] );
-		const clampT = ( v, m ) => Math.max( - m, Math.min( m, v ) );
-		const drive = this.spec.drive, fs = arcade && drive === 'awd' ? 0.3 : this.spec.split;
-		let Tf = drive === 'rwd' ? 0 : drive === 'fwd' || hand ? wheelT : wheelT * fs;
-		let Tr = drive === 'fwd' || hand ? 0 : drive === 'rwd' ? wheelT : wheelT * ( 1 - fs );
-		if ( drive === 'awd' && ! hand ) {
+		if ( arcade ) this.arcadeForces( dt, inp, F, T, contacts, up, fwd, throttle, brake, hand, wheelT );
+		else {
 
-			const dW = ( W[ 0 ].omega + W[ 1 ].omega - W[ 2 ].omega - W[ 3 ].omega ) / 2;
-			const Tc = clampT( 70 * dW, Math.abs( wheelT ) * 0.45 + 250 );
-			Tf -= Tc; Tr += Tc;
+			const I = 1.3, R = this.radius;
+			// drivetrain: centre diff 41/59 with a limited-slip coupling, limited-slip front and rear diffs.
+			// The handbrake opens the centre coupling, so the front axle takes all the drive.
+			const W = this.wheels, Td = this._td || ( this._td = [ 0, 0, 0, 0 ] );
+			const clampT = ( v, m ) => Math.max( - m, Math.min( m, v ) );
+			const drive = this.spec.drive, fs = arcade && drive === 'awd' ? 0.3 : this.spec.split;
+			let Tf = drive === 'rwd' ? 0 : drive === 'fwd' || hand ? wheelT : wheelT * fs;
+			let Tr = drive === 'fwd' || hand ? 0 : drive === 'rwd' ? wheelT : wheelT * ( 1 - fs );
+			if ( drive === 'awd' && ! hand ) {
 
-		}
+				const dW = ( W[ 0 ].omega + W[ 1 ].omega - W[ 2 ].omega - W[ 3 ].omega ) / 2;
+				const Tc = clampT( 70 * dW, Math.abs( wheelT ) * 0.45 + 250 );
+				Tf -= Tc; Tr += Tc;
 
-		// axle differentials: lsd 0 = open (the Volvo spins its inside front wheel), 1 = nearly locked
-		const lsd = this.spec.lsd ?? 0.5;
-		for ( const [ a, b, Ta ] of [ [ 0, 1, Tf ], [ 2, 3, Tr ] ] ) {
+			}
 
-			const Tl = clampT( ( 8 + 75 * lsd ) * ( W[ a ].omega - W[ b ].omega ), Math.abs( Ta ) * ( 0.08 + 0.6 * lsd ) + 15 + 90 * lsd );
-			Td[ a ] = Ta / 2 - Tl / 2;
-			Td[ b ] = Ta / 2 + Tl / 2;
+			// axle differentials: lsd 0 = open (the Volvo spins its inside front wheel), 1 = nearly locked
+			const lsd = this.spec.lsd ?? 0.5;
+			for ( const [ a, b, Ta ] of [ [ 0, 1, Tf ], [ 2, 3, Tr ] ] ) {
 
-		}
+				const Tl = clampT( ( 8 + 75 * lsd ) * ( W[ a ].omega - W[ b ].omega ), Math.abs( Ta ) * ( 0.08 + 0.6 * lsd ) + 15 + 90 * lsd );
+				Td[ a ] = Ta / 2 - Tl / 2;
+				Td[ b ] = Ta / 2 + Tl / 2;
 
-		for ( let i = 0; i < 4; i ++ ) {
+			}
 
-			const w = this.wheels[ i ];
-			const Tdrive = Td[ i ];
-			let Tb = brake * ( w.front ? 1900 : 1100 );
-			if ( hand && ! w.front ) Tb += 4000;
-			if ( this.auto && throttle < 0.05 && Math.abs( vF ) < 0.4 && this.gear !== 0 ) Tb += 400; // hold
+			for ( let i = 0; i < 4; i ++ ) {
 
-			if ( ! w.contact ) {
+				const w = this.wheels[ i ];
+				const Tdrive = Td[ i ];
+				let Tb = brake * ( w.front ? 1900 : 1100 );
+				if ( hand && ! w.front ) Tb += 4000;
+				if ( this.auto && throttle < 0.05 && Math.abs( vF ) < 0.4 && this.gear !== 0 ) Tb += 400; // hold
 
-				w.omega += Tdrive / I * dt;
+				if ( ! w.contact ) {
+
+					w.omega += Tdrive / I * dt;
+					const d = Tb * dt / I;
+					w.omega = Math.abs( w.omega ) <= d ? 0 : w.omega - Math.sign( w.omega ) * d;
+					w.omega *= 0.999;
+					w.slide = 0;
+					continue;
+
+				}
+
+				const nrm = w.nrm;
+				w.surf = world.surface( w.cp.x, w.cp.z );
+				const mu = ( w.front ? 1.12 : 1.02 ) * ( this.spec.grip || 1 ) * GRIP[ w.surf ] * ( arcade ? ( w.front ? 1.08 : 0.9 * ( 1 - 0.22 * throttle * Math.abs( inp.steer ) * Math.min( 1, Math.max( 0, ( Math.abs( vF ) - 8 ) / 10 ) ) ) ) : 1 );
+				const s = w.front ? this.steer : 0;
+				const wf = t.b.copy( fwd ).multiplyScalar( Math.cos( s ) ).addScaledVector( left, Math.sin( s ) );
+				const f = wf.addScaledVector( nrm, - nrm.dot( wf ) ).normalize();
+				const side = t.c.crossVectors( nrm, f );
+				const r = w.cp.clone().sub( this.pos );
+				const vc = new V3().crossVectors( this.angVel, r ).add( this.vel );
+				const vx = vc.dot( f ), vy = vc.dot( side );
+				const Fz = Math.min( w.Fs, 12000 );
+				const Vn = Math.max( Math.abs( vx ), 3 );
+
+				// wheel spin: semi-implicit with secant tyre stiffness (lets wheels spin when saturated)
+				const slope = Fz * mu * TC * TB / KP;
+				const kp = w.kappa;
+				const Ceff = Math.abs( kp ) > 0.02 ? Math.min( slope, Math.abs( Fz * mu * Math.sin( TC * Math.atan( TB * kp / KP ) ) / kp ) ) : slope;
+				let om = ( w.omega + dt / I * ( Tdrive + R * Ceff * vx / Vn ) ) / ( 1 + dt * R * R * Ceff / ( I * Vn ) );
 				const d = Tb * dt / I;
-				w.omega = Math.abs( w.omega ) <= d ? 0 : w.omega - Math.sign( w.omega ) * d;
-				w.omega *= 0.999;
-				w.slide = 0;
-				continue;
+				om = Math.abs( om ) <= d ? 0 : om - Math.sign( om ) * d;
+				w.omega = om;
+
+				const kappa = Math.max( - 1.5, Math.min( 1.5, ( om * R - vx ) / Vn ) );
+				w.kappa = kappa;
+				// combined slip: a locked or spinning tyre loses its side grip (handbrake turns)
+				const sx = kappa / KP, sy = ( vy / Vn ) / AP;
+				const sl = Math.hypot( sx, sy );
+				let Fx = 0, Fy = 0;
+				if ( sl > 1e-6 ) {
+
+					// arcade: force stays at its peak past the limit, so slides are long and controllable
+					const Fm = Fz * mu * ( arcade ? Math.tanh( 1.9 * sl ) : Math.sin( TC * Math.atan( TB * sl ) ) );
+					Fx = Fm * sx / sl;
+					Fy = - Fm * sy / sl;
+
+				}
+				const stop = Math.abs( vy ) * ( this.mass / 4 ) / dt * 0.8;
+				if ( Math.abs( Fy ) > stop ) Fy = Math.sign( Fy ) * stop;
+				w.slide = Math.min( 1, Math.abs( vy ) / 6 + Math.max( 0, Math.abs( kappa ) - 0.2 ) );
+
+				if ( w.surf === 0 || w.surf === 3 ) Fx -= Math.sign( vx ) * Math.min( Math.abs( vx ) * 400, Fz * 0.035 ); // grass and gravel drag
+				const total = up.clone().multiplyScalar( w.Fs ).addScaledVector( f, Fx ).addScaledVector( side, Fy );
+				F.add( total );
+				T.add( new V3().crossVectors( r, total ) );
 
 			}
-
-			const nrm = w.nrm;
-			w.surf = world.surface( w.cp.x, w.cp.z );
-			const mu = ( w.front ? 1.12 : 1.02 ) * ( this.spec.grip || 1 ) * GRIP[ w.surf ] * ( arcade ? ( w.front ? 1.08 : 0.9 * ( 1 - 0.22 * throttle * Math.abs( inp.steer ) * Math.min( 1, Math.max( 0, ( Math.abs( vF ) - 8 ) / 10 ) ) ) ) : 1 );
-			const s = w.front ? this.steer : 0;
-			const wf = t.b.copy( fwd ).multiplyScalar( Math.cos( s ) ).addScaledVector( left, Math.sin( s ) );
-			const f = wf.addScaledVector( nrm, - nrm.dot( wf ) ).normalize();
-			const side = t.c.crossVectors( nrm, f );
-			const r = w.cp.clone().sub( this.pos );
-			const vc = new V3().crossVectors( this.angVel, r ).add( this.vel );
-			const vx = vc.dot( f ), vy = vc.dot( side );
-			const Fz = Math.min( w.Fs, 12000 );
-			const Vn = Math.max( Math.abs( vx ), 3 );
-
-			// wheel spin: semi-implicit with secant tyre stiffness (lets wheels spin when saturated)
-			const slope = Fz * mu * TC * TB / KP;
-			const kp = w.kappa;
-			const Ceff = Math.abs( kp ) > 0.02 ? Math.min( slope, Math.abs( Fz * mu * Math.sin( TC * Math.atan( TB * kp / KP ) ) / kp ) ) : slope;
-			let om = ( w.omega + dt / I * ( Tdrive + R * Ceff * vx / Vn ) ) / ( 1 + dt * R * R * Ceff / ( I * Vn ) );
-			const d = Tb * dt / I;
-			om = Math.abs( om ) <= d ? 0 : om - Math.sign( om ) * d;
-			w.omega = om;
-
-			const kappa = Math.max( - 1.5, Math.min( 1.5, ( om * R - vx ) / Vn ) );
-			w.kappa = kappa;
-			// combined slip: a locked or spinning tyre loses its side grip (handbrake turns)
-			const sx = kappa / KP, sy = ( vy / Vn ) / AP;
-			const sl = Math.hypot( sx, sy );
-			let Fx = 0, Fy = 0;
-			if ( sl > 1e-6 ) {
-
-				// arcade: force stays at its peak past the limit, so slides are long and controllable
-				const Fm = Fz * mu * ( arcade ? Math.tanh( 1.9 * sl ) : Math.sin( TC * Math.atan( TB * sl ) ) );
-				Fx = Fm * sx / sl;
-				Fy = - Fm * sy / sl;
-
-			}
-			const stop = Math.abs( vy ) * ( this.mass / 4 ) / dt * 0.8;
-			if ( Math.abs( Fy ) > stop ) Fy = Math.sign( Fy ) * stop;
-			w.slide = Math.min( 1, Math.abs( vy ) / 6 + Math.max( 0, Math.abs( kappa ) - 0.2 ) );
-
-			if ( w.surf === 0 || w.surf === 3 ) Fx -= Math.sign( vx ) * Math.min( Math.abs( vx ) * 400, Fz * 0.035 ); // grass and gravel drag
-			const total = up.clone().multiplyScalar( w.Fs ).addScaledVector( f, Fx ).addScaledVector( side, Fy );
-			F.add( total );
-			T.add( new V3().crossVectors( r, total ) );
 
 		}
 
-		// aero + rolling resistance
+		// aero drag + rolling resistance
 		const sp = this.vel.length();
-		F.addScaledVector( this.vel, - 0.42 * sp - 12 );
-		if ( arcade && sp > 4 && contacts.length >= 2 ) {
-
-			// drift assist: on throttle a slide keeps its speed, and the slide angle is held below ~65 degrees
-			const vL = this.vel.dot( left ), beta = Math.atan2( vL, Math.abs( vF ) );
-			F.addScaledVector( this.vel, throttle * this.mass * ( this.spec.drive === 'awd' ? 3.2 : 4.8 ) * Math.min( 1, Math.abs( beta ) * 1.5 ) / sp );
-			const over = Math.abs( beta ) - 1.0;
-			if ( over > 0 ) T.addScaledVector( up, Math.sign( beta ) * ( vF >= 0 ? 1 : - 1 ) * over * this.inertia.y * 9 );
-			const dBeta = this._pb === undefined ? 0 : ( beta - this._pb ) / dt;
-			this._pb = beta;
-			if ( Math.abs( beta ) > 0.12 && vF > 7 ) {
-
-				// drift: the slide angle follows the stick. Steering into the turn and throttle widen it,
-				// counter-steer or lifting off straightens the car out.
-				const sb = Math.sign( beta ), into = Math.max( - 1, Math.min( 1, - inp.steer * sb ) );
-				const target = Math.max( 0.03, Math.min( 0.95, into > 0.1 ? 0.15 + 0.5 * into + 0.25 * throttle - ( throttle < 0.2 ? 0.2 : 0 ) : 0.04 + 0.12 * throttle + 0.3 * Math.min( 0, into ) ) );
-				T.addScaledVector( up, this.inertia.y * ( - sb * ( target - Math.abs( beta ) ) * 9 + Math.max( - 3, Math.min( 3, dBeta ) ) * 2.2 ) );
-				this.drifting = true;
-
-			} else {
-
-				T.addScaledVector( up, - this.angVel.dot( up ) * this.inertia.y * 0.6 * ( 1 - Math.abs( inp.steer ) * 0.5 ) );
-				this.drifting = false;
-
-			}
-
-		}
+		F.addScaledVector( this.vel, - ( this.spec.cda || 0.4 ) * sp - 0.012 * this.mass * G / Math.max( 1, sp ) * Math.min( 1, sp ) );
 
 		// ---------- integrate ----------
 		this.vel.addScaledVector( F, dt / this.mass );
@@ -429,6 +407,168 @@ export class Vehicle {
 		this.quat.set( this.quat.x + wq.x, this.quat.y + wq.y, this.quat.z + wq.z, this.quat.w + wq.w ).normalize();
 
 		this.collide();
+
+	}
+
+	// ---------- arcade: a forgiving drift model ----------
+	// Suspension stays physical (pitch, roll, bumps, jumps). The tyres are replaced by a yaw-rate controller:
+	// with grip the car turns like a well set-up road car; the handbrake, a flick or power on in a RWD/AWD car
+	// starts a slide, and in a slide the stick sets the slide angle (steer into the turn = wider, counter-steer = out).
+	arcadeForces( dt, inp, F, T, contacts, up, fwd, throttle, brake, hand, wheelT ) {
+
+		const W = this.wheels, S = this.spec, world = this.world, R = this.radius;
+		const t = this._a || ( this._a = { n: new V3(), f: new V3(), s: new V3(), r: new V3(), x: new V3(), y: new V3() } );
+		for ( const w of contacts ) {
+
+			// suspension along the body up axis, at the contact point
+			const r = t.r.copy( w.cp ).sub( this.pos );
+			const fs = t.x.copy( up ).multiplyScalar( w.Fs );
+			F.add( fs );
+			T.add( t.y.crossVectors( r, fs ) );
+			w.surf = world.surface( w.cp.x, w.cp.z );
+
+		}
+
+		const nC = contacts.length;
+		const steer = inp.steer;
+		if ( nC === 0 ) {
+
+			// airborne: keep the car roughly level so it lands on its wheels
+			const lev = t.x.crossVectors( up, t.y.set( 0, 1, 0 ) );
+			T.addScaledVector( lev, this.inertia.x * 3 );
+			T.addScaledVector( this.angVel, - this.inertia.x * 0.8 );
+			for ( const w of W ) { if ( hand && ! w.front ) w.omega = 0; w.slide = 0; }
+			this.drifting = false;
+			return;
+
+		}
+
+		const n = t.n.set( 0, 0, 0 );
+		for ( const w of contacts ) n.add( w.nrm );
+		n.normalize();
+		const f = t.f.copy( fwd ).addScaledVector( n, - n.dot( fwd ) ).normalize();
+		const s = t.s.crossVectors( n, f ); // left
+		const vF = this.vel.dot( f ), vL = this.vel.dot( s ), sp = Math.hypot( vF, vL );
+		let load = 0, mu = 0;
+		for ( const w of contacts ) { load += w.Fs; mu += GRIP[ w.surf ]; }
+		mu = mu / nC * ( S.grip || 1 );
+		load = Math.min( 1.4, load / ( this.mass * G ) ) * Math.min( 1, nC / 2.5 );
+		const yawRate = this.angVel.dot( n );
+		const slip = sp > 2 && vF > 0 ? Math.atan2( - vL, vF ) : 0; // + = nose left of the direction of travel
+		this.slip = slip;
+		const awd = S.drive === 'awd', fwdD = S.drive === 'fwd';
+
+		// ---- longitudinal: engine through the driven wheels, traction limited ----
+		const share = awd ? ( hand ? 0.55 : 1 ) : fwdD ? 0.62 : 0.56;
+		const cap = mu * this.mass * G * load * share * 1.05;
+		const Fd = wheelT / R;
+		const spin = cap > 1 ? Math.abs( Fd ) / cap : 0;
+		let Fx = Math.max( - cap, Math.min( cap, Fd ) );
+		const gBrake = mu * this.mass * G * load;
+		if ( Math.abs( vF ) > 0.3 ) Fx -= Math.sign( vF ) * ( brake * gBrake * 1.0 + ( hand ? gBrake * 0.16 : 0 ) );
+		else if ( brake > 0.05 || hand || ( this.auto && throttle < 0.05 && this.gear !== 0 ) ) Fx -= vF * this.mass * 6;
+
+		// ---- drift state ----
+		const lock = 0.62 / ( 1 + sp / 14 );
+		const wb = S.axle[ 0 ] - S.axle[ 1 ];
+		const aMax = mu * load * G * 1.02;
+		let rWant = vF * Math.tan( steer * lock ) / wb;
+		const rMax = aMax / Math.max( 4, Math.abs( vF ) );
+		const over = Math.abs( rWant ) / ( rMax + 1e-3 );
+		if ( ! this.drifting && vF > 5.5 ) {
+
+			let enter = 0;
+			if ( hand && Math.abs( steer ) > 0.15 ) enter = Math.sign( steer );
+			else if ( ! fwdD && throttle > 0.8 && Math.abs( steer ) > 0.55 && vF < 32 && this.gear <= 3 ) enter = Math.sign( steer );
+			else if ( over > 1.5 && vF > 13 && throttle < 0.15 ) enter = Math.sign( steer ); // lift-off flick
+			else if ( Math.abs( slip ) > 0.22 ) enter = Math.sign( slip );
+			if ( enter ) {
+
+				this.drifting = true;
+				this.driftDir = enter;
+				this.driftT = 0;
+				// a kick of rotation so the rear steps out right away
+				this.angVel.addScaledVector( n, enter * ( hand ? 0.9 : 0.55 ) );
+
+			}
+
+		}
+
+		let targetSlip = 0, latGrip = 1;
+		if ( this.drifting ) {
+
+			this.driftT += dt;
+			if ( Math.abs( slip ) > 0.12 ) this.driftDir = Math.sign( slip );
+			const dir = this.driftDir;
+			const into = Math.max( - 1, Math.min( 1, steer * dir ) );
+			const power = fwdD ? 0.12 : awd ? 0.22 : 0.32;
+			let ang = 0.42 + 0.32 * into + power * throttle;
+			if ( hand ) ang = Math.max( ang, 0.75 );
+			if ( into < - 0.35 ) ang = 0.04; // counter-steer: straighten out
+			if ( ! hand && throttle < 0.1 && into < 0.3 ) ang = Math.min( ang, 0.18 ); // lift and no steer: the car settles
+			targetSlip = dir * Math.max( 0.03, Math.min( 1.05, ang ) );
+			latGrip = 0.42 + 0.2 * ( 1 - throttle ) + ( into < - 0.35 ? 0.3 : 0 );
+			if ( ( Math.abs( slip ) < 0.07 && this.driftT > 0.35 && ! hand ) || vF < 4 ) this.drifting = false;
+
+		}
+
+		// ---- yaw ----
+		const vYaw = Math.atan2( this.vel.dot( t.x.set( 1, 0, 0 ) ), this.vel.dot( t.y.set( 0, 0, 1 ) ) );
+		let rV = 0;
+		if ( this._vYaw !== undefined && sp > 2 ) { let d = vYaw - this._vYaw; d = Math.atan2( Math.sin( d ), Math.cos( d ) ); rV = d / dt; }
+		this._vYaw = vYaw;
+		this._rV = ( this._rV || 0 ) + ( rV - ( this._rV || 0 ) ) * Math.min( 1, dt * 20 );
+		let rT, k;
+		if ( this.drifting ) {
+
+			rT = this._rV + ( targetSlip - slip ) * 4.5;
+			k = 9;
+
+		} else {
+
+			// grip: steering sets the yaw rate, limited by what the tyres can hold (a touch of oversteer allowed)
+			rT = Math.max( - rMax * 1.04, Math.min( rMax * 1.04, rWant ) );
+			k = sp < 1 ? 4 : 10;
+
+		}
+
+		const Tyaw = Math.max( - 14, Math.min( 14, ( rT - yawRate ) * k ) ) * this.inertia.y * Math.min( 1, load * 1.5 );
+		T.addScaledVector( n, Tyaw );
+
+		// ---- lateral: kill sideways speed up to what the tyres can hold ----
+		const FyMax = aMax * this.mass * latGrip * ( hand && ! this.drifting ? 0.6 : 1 );
+		const Fy = Math.max( - FyMax, Math.min( FyMax, - vL * this.mass * ( this.drifting ? 3 : 14 ) ) );
+
+		// keep the speed in a slide when on the throttle (arcade feel)
+		if ( this.drifting && sp > 3 ) F.addScaledVector( this.vel, throttle * this.mass * ( fwdD ? 1.8 : 3.4 ) * Math.min( 1, Math.abs( slip ) * 2 ) / sp );
+
+		const Fl = t.x.copy( f ).multiplyScalar( Fx ).addScaledVector( s, Fy );
+		F.add( Fl );
+		// forces act at the contact patch height: body roll in turns, dive under braking, squat on power
+		T.add( t.y.crossVectors( t.r.copy( n ).multiplyScalar( - 0.32 ), Fl ) );
+
+		// ---- wheels: spin for the rev counter, the tyre marks and the sound ----
+		const tyreSpin = this.drifting ? 0.15 + throttle * 0.35 : spin > 1 ? Math.min( 0.8, ( spin - 1 ) * 0.6 ) : 0;
+		const latSat = Math.min( 1, Math.abs( vL * this.mass * 14 ) / ( FyMax + 1 ) );
+		for ( const w of W ) {
+
+			const driven = awd || ( fwdD ? w.front : ! w.front );
+			let om = vF / R;
+			if ( driven && Fd * vF >= 0 ) om *= 1 + tyreSpin;
+			if ( hand && ! w.front ) om = 0;
+			w.omega = om;
+			if ( ! w.contact ) { w.slide = 0; continue; }
+			let sl = 0;
+			if ( this.drifting ) sl = Math.min( 1, Math.abs( slip ) * ( w.front ? 0.7 : 1.9 ) + 0.15 );
+			else if ( latSat > 0.95 ) sl = ( latSat - 0.95 ) * 4;
+			if ( driven && tyreSpin > 0.05 ) sl = Math.max( sl, Math.min( 1, tyreSpin * 1.8 ) );
+			if ( hand && ! w.front && Math.abs( vF ) > 2 ) sl = Math.max( sl, 0.8 );
+			if ( brake > 0.9 && Math.abs( vF ) > 8 ) sl = Math.max( sl, 0.45 );
+			if ( w.surf === 0 || w.surf === 3 ) sl *= 0.6;
+			w.slide = sl;
+			w.kappa = 0;
+
+		}
 
 	}
 

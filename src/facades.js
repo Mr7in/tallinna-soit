@@ -6,9 +6,10 @@ import { ORIGIN_E, ORIGIN_N } from './world.js';
 const URL = 'https://tiles.arcgis.com/tiles/ZYGCYltwz5ExeoGm/arcgis/rest/services/hooned_lod2_tallinn_slpk/SceneServer/layers/0/nodes/';
 const REC = 7; // floats per leaf: res, x, z, y, r, texels, verts
 
-function facadeMaterial( tex ) {
+function facadeMaterial( tex, sharp ) {
 
 	const m = new THREE.MeshLambertMaterial( { map: tex, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: - 2, polygonOffsetUnits: - 8 } );
+	m.defines = { SHARP: sharp ? 1 : 0 };
 	m.onBeforeCompile = s => {
 
 		s.vertexShader = s.vertexShader
@@ -20,6 +21,16 @@ function facadeMaterial( tex ) {
 				vec2 fuv = vRegion.xy + fract( vMapUv ) * ( vRegion.zw - vRegion.xy );
 				vec2 gx = dFdx( vMapUv ) * ( vRegion.zw - vRegion.xy ), gy = dFdy( vMapUv ) * ( vRegion.zw - vRegion.xy );
 				vec4 sampledDiffuseColor = textureGrad( map, fuv, gx, gy );
+				// close up the photo is magnified: a light unsharp mask brings back signs and window edges
+				#if SHARP == 1
+				vec2 ts = 1.0 / vec2( textureSize( map, 0 ) );
+				float mag = clamp( 1.0 - max( length( gx ), length( gy ) ) / ( ts.x * 1.5 ), 0.0, 1.0 );
+				if ( mag > 0.01 ) {
+					vec3 blur = ( textureGrad( map, fuv + vec2( ts.x, 0.0 ), gx, gy ).rgb + textureGrad( map, fuv - vec2( ts.x, 0.0 ), gx, gy ).rgb
+						+ textureGrad( map, fuv + vec2( 0.0, ts.y ), gx, gy ).rgb + textureGrad( map, fuv - vec2( 0.0, ts.y ), gx, gy ).rgb ) * 0.25;
+					sampledDiffuseColor.rgb = clamp( sampledDiffuseColor.rgb + ( sampledDiffuseColor.rgb - blur ) * 0.65 * mag, 0.0, 1.0 );
+				}
+				#endif
 				diffuseColor *= sampledDiffuseColor;` );
 
 	};
@@ -43,6 +54,7 @@ export class Facades {
 		this.maxTex = 1024;
 		this.enabled = true;
 		this.failures = 0;
+		this.sharp = true;
 
 	}
 
@@ -70,8 +82,8 @@ export class Facades {
 		if ( ! this.enabled || ! this.world.manifest || ! this.world.manifest.facadeChunks ) return;
 		const has = this.hasSet || ( this.hasSet = new Set( this.world.manifest.facadeChunks.map( c => c[ 0 ] + '_' + c[ 1 ] ) ) );
 		const [ cx, cy ] = this.world.chunkOf( x, z );
-		const R = this.radius, want = new Map();
-		for ( let dy = - 1; dy <= 1; dy ++ ) for ( let dx = - 1; dx <= 1; dx ++ ) {
+		const R = this.radius, want = new Map(), span = R > 240 ? 2 : 1;
+		for ( let dy = - span; dy <= span; dy ++ ) for ( let dx = - span; dx <= span; dx ++ ) {
 
 			const key = ( cx + dx ) + '_' + ( cy + dy );
 			if ( ! has.has( key ) ) continue;
@@ -103,7 +115,7 @@ export class Facades {
 
 	pump() {
 
-		while ( this.active < 6 && this.queue.length ) {
+		while ( this.active < 8 && this.queue.length ) {
 
 			const [ , res, w ] = this.queue.shift();
 			if ( this.nodes.has( res ) ) continue;
@@ -193,7 +205,7 @@ export class Facades {
 		tex.flipY = false;
 		tex.anisotropy = 8;
 		tex.needsUpdate = true;
-		const mesh = new THREE.Mesh( g, facadeMaterial( tex ) );
+		const mesh = new THREE.Mesh( g, facadeMaterial( tex, this.sharp ) );
 		mesh.position.set( cx, cy, cz );
 		n.mesh = mesh;
 		this.group.add( mesh );

@@ -8,6 +8,7 @@ import { toLest } from './lest.js';
 import { Roads } from './roads.js';
 import { Facades } from './facades.js';
 import { Skids } from './skids.js';
+import { TileMap, worldToEN, enToWorld } from './map.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -75,7 +76,6 @@ const specOf = id => CAR_SPECS.find( c => c.id === id );
 
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer( { canvas: $( 'c' ), antialias: true, powerPreference: 'high-performance' } );
-renderer.setPixelRatio( Math.min( window.devicePixelRatio, 1.75 ) );
 renderer.setSize( innerWidth, innerHeight );
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.NeutralToneMapping;
@@ -94,21 +94,37 @@ const SUN_DIR = new THREE.Vector3( - 0.5, 1, 0.35 ).normalize();
 const sun = new THREE.DirectionalLight( 0xfff0d8, 1.7 );
 sun.castShadow = true;
 sun.shadow.intensity = 0.62;
-sun.shadow.bias = - 0.0004;
-sun.shadow.normalBias = 0.04;
+sun.shadow.bias = - 0.0006;
+sun.shadow.normalBias = 0.12; // enough to keep acne (dotted walls) off the flat-shaded buildings
 scene.add( sun, sun.target );
 
-// sky dome: horizon haze, blue zenith and a soft sun glow
+// sky dome: horizon haze, blue zenith, a soft sun glow and drifting fair-weather clouds (all in the shader, no textures)
 const sky = new THREE.Mesh( new THREE.SphereGeometry( 3000, 32, 16 ), new THREE.ShaderMaterial( {
 	side: THREE.BackSide, depthWrite: false, fog: false,
-	uniforms: { uSun: { value: SUN_DIR }, uHor: { value: HORIZON }, uZen: { value: new THREE.Color( 0x3f7fc8 ) } },
+	uniforms: { uSun: { value: SUN_DIR }, uHor: { value: HORIZON }, uZen: { value: new THREE.Color( 0x3f7fc8 ) }, uTime: { value: 0 } },
 	vertexShader: 'varying vec3 vD; void main(){ vD = normalize( position ); vec4 p = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); gl_Position = p.xyww; }',
-	fragmentShader: `uniform vec3 uSun, uHor, uZen; varying vec3 vD;
+	fragmentShader: `uniform vec3 uSun, uHor, uZen; uniform float uTime; varying vec3 vD;
+		float hash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
+		float noise( vec2 p ) {
+			vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );
+			return mix( mix( hash( i ), hash( i + vec2( 1.0, 0.0 ) ), f.x ), mix( hash( i + vec2( 0.0, 1.0 ) ), hash( i + vec2( 1.0, 1.0 ) ), f.x ), f.y );
+		}
+		float fbm( vec2 p ) { float v = 0.0, a = 0.5; for ( int i = 0; i < 5; i ++ ) { v += a * noise( p ); p = p * 2.03 + vec2( 1.7, 9.2 ); a *= 0.5; } return v; }
 		void main(){
 			float h = max( vD.y, 0.0 );
 			vec3 c = mix( uHor, uZen, pow( h, 0.55 ) );
 			c = mix( c, uHor * 0.92, smoothstep( 0.0, -0.08, vD.y ) );
 			float s = max( dot( vD, uSun ), 0.0 );
+			// clouds on a flat layer high above: project the view ray onto it
+			if ( vD.y > 0.02 ) {
+				vec2 uv = vD.xz / ( vD.y + 0.12 ) * 1.6 + vec2( uTime * 0.006, uTime * 0.0025 );
+				float n = fbm( uv );
+				float cov = smoothstep( 0.48, 0.72, n );
+				float thick = smoothstep( 0.5, 0.9, n );
+				vec3 cc = mix( vec3( 1.0, 0.99, 0.97 ), vec3( 0.74, 0.78, 0.84 ), thick * 0.75 );
+				cc += vec3( 1.0, 0.93, 0.8 ) * pow( s, 6.0 ) * 0.35 * ( 1.0 - thick );
+				c = mix( c, cc, cov * smoothstep( 0.02, 0.22, vD.y ) * 0.92 );
+			}
 			c += vec3( 1.0, 0.92, 0.75 ) * ( pow( s, 900.0 ) * 6.0 + pow( s, 24.0 ) * 0.25 );
 			gl_FragColor = vec4( c, 1.0 );
 			#include <tonemapping_fragment>
@@ -122,8 +138,6 @@ scene.add( sky );
 
 const camera = new THREE.PerspectiveCamera( 55, innerWidth / innerHeight, 0.3, 4000 );
 camera.layers.enable( 2 );
-const mapCam = new THREE.OrthographicCamera( - 160, 160, 160, - 160, 1, 2000 );
-mapCam.layers.enable( 1 );
 
 // reflections for car paint and glass
 const pmrem = new THREE.PMREMGenerator( renderer );
@@ -181,6 +195,7 @@ const world = new World( scene );
 const vehicle = new Vehicle( world );
 world.onTreeFall = h => audio.play( 'treefall.ogg', Math.min( 1, 0.4 + h / 25 ) );
 const roads = new Roads( world );
+roads.env = envTex;
 const facades = new Facades( world );
 roads.onPropFall = p => { audio.play( 'crash.ogg', p.type === 3 ? 0.9 : 0.45 ); rumble( 0.6, 0.4, 120 ); };
 const skids = new Skids( scene );
@@ -208,15 +223,6 @@ function selectCar( id ) {
 
 }
 
-// minimap marker (only the map camera sees layer 1)
-const marker = new THREE.Mesh(
-	new THREE.ShapeGeometry( new THREE.Shape( [ new THREE.Vector2( 0, 9 ), new THREE.Vector2( 6, - 6 ), new THREE.Vector2( 0, - 2 ), new THREE.Vector2( - 6, - 6 ) ] ) ).rotateX( - Math.PI / 2 ),
-	new THREE.MeshBasicMaterial( { color: 0xffb400, depthTest: false, fog: false } ),
-);
-marker.geometry.rotateY( Math.PI );
-marker.renderOrder = 10;
-marker.layers.set( 1 );
-scene.add( marker );
 
 // ---------- showroom (main menu) ----------
 const show = new THREE.Scene();
@@ -260,9 +266,12 @@ function makeShowCar() {
 
 function renderShowroom( dt ) {
 
-	if ( window.__game && window.__game.turn !== undefined ) turntable.rotation.y = window.__game.turn; else turntable.rotation.y += dt * 0.25;
+	showIdle += dt;
+	if ( window.__game && window.__game.turn !== undefined ) turntable.rotation.y = window.__game.turn;
+	else { if ( showIdle > 3 ) showTurn += dt * 0.25; turntable.rotation.y += ( showTurn - turntable.rotation.y ) * Math.min( 1, dt * 12 ); }
+	if ( showIdle > 3 ) showPitch *= 1 - Math.min( 1, dt * 1.5 );
 	const wide = innerWidth > 760;
-	showCam.position.set( wide ? 1.2 : 0, 1.55, 8.6 );
+	showCam.position.set( wide ? 1.2 : 0, 1.55 + showPitch * 8, 8.6 - showPitch * 3 );
 	showCam.lookAt( wide ? 1.4 : 0, wide ? 0.55 : 0.1, 0 );
 	renderer.setViewport( 0, 0, innerWidth, innerHeight );
 	renderer.clear();
@@ -395,6 +404,7 @@ function setPaused( on ) {
 
 	if ( ! started || inMenu || spawning && on ) return;
 	paused = on;
+	if ( on && document.pointerLockElement ) document.exitPointerLock();
 	$( 'pause' ).style.display = on ? 'grid' : 'none';
 	$( 'p-where' ).textContent = PLACES[ S.place ].name;
 	keys.clear();
@@ -432,6 +442,18 @@ const ctl = { throttle: 0, brake: 0, steer: 0, handbrake: false };
 addEventListener( 'keydown', e => {
 
 	audio.unlock();
+	if ( mapOpen ) {
+
+		if ( e.code === 'KeyM' || e.code === 'Escape' ) closeMap();
+		else if ( e.code === 'Enter' || e.code === 'Space' ) { const p = big.toEN( big.w / 2, big.h / 2 ); teleport( p.E, p.N ); }
+		else if ( e.code === 'Equal' || e.code === 'NumpadAdd' || e.code === 'KeyE' ) big.zoomAt( 0.7 );
+		else if ( e.code === 'Minus' || e.code === 'NumpadSubtract' || e.code === 'KeyQ' ) big.zoomAt( 1 / 0.7 );
+		else keys.add( e.code );
+		e.preventDefault();
+		return;
+
+	}
+
 	if ( inMenu || paused ) {
 
 		const m = { ArrowUp: - 1, ArrowDown: 1, KeyW: - 1, KeyS: 1 }[ e.code ];
@@ -455,11 +477,11 @@ addEventListener( 'keydown', e => {
 	if ( e.code === 'KeyR' ) resetCar();
 	if ( e.code === 'KeyH' ) audio.horn();
 	if ( e.code === 'KeyT' ) { cycle( 'mode', 1 ); toast( S.mode === 'arcade' ? 'Arcade' : 'Simulatsioon' ); }
-	if ( e.code === 'KeyM' ) cycle( 'sound', 1 );
+	if ( e.code === 'KeyM' ) openMap();
 
 } );
 addEventListener( 'keyup', e => keys.delete( e.code ) );
-addEventListener( 'blur', () => { keys.clear(); if ( started && ! inMenu && ! paused ) setPaused( true ); } );
+addEventListener( 'blur', () => { keys.clear(); if ( started && ! inMenu && ! paused && ! mapOpen ) setPaused( true ); } );
 
 const padPrev = {};
 let padNavT = 0, padSeen = false;
@@ -473,9 +495,20 @@ function pollPad( dt ) {
 	const ev = {};
 	for ( const i of [ 0, 1, 2, 3, 4, 5, 8, 9, 12, 13, 14, 15 ] ) ev[ i ] = edge( i );
 
-	if ( inMenu || paused ) {
+	if ( mapOpen ) {
 
-		padNavT -= dt;
+		const lx = gp.axes[ 0 ] || 0, ly = gp.axes[ 1 ] || 0;
+		const dz = v => Math.abs( v ) < 0.15 ? 0 : v;
+		big.pan( - dz( lx ) * 700 * dt, - dz( ly ) * 700 * dt );
+		const zi = ( gp.buttons[ 7 ] || { value: 0 } ).value, zo = ( gp.buttons[ 6 ] || { value: 0 } ).value;
+		if ( zi > 0.05 || zo > 0.05 ) big.zoomAt( Math.exp( ( zo - zi ) * dt * 2.5 ) );
+		if ( ev[ 0 ] ) { const p = big.toEN( big.w / 2, big.h / 2 ); teleport( p.E, p.N ); }
+		if ( ev[ 1 ] || ev[ 3 ] || ev[ 8 ] || ev[ 9 ] ) closeMap();
+		return null;
+
+	}
+
+	if ( inMenu || paused ) {
 		const ly = gp.axes[ 1 ] || 0, lx = gp.axes[ 0 ] || 0;
 		let v = ev[ 12 ] ? - 1 : ev[ 13 ] ? 1 : 0, h = ev[ 14 ] ? - 1 : ev[ 15 ] ? 1 : 0;
 		if ( ! v && ! h && padNavT <= 0 ) {
@@ -498,7 +531,8 @@ function pollPad( dt ) {
 	if ( ev[ 9 ] ) { setPaused( true ); return null; }
 	if ( ev[ 5 ] ) vehicle.shift( 1 );
 	if ( ev[ 4 ] ) vehicle.shift( - 1 );
-	if ( ev[ 3 ] || ev[ 8 ] ) cycleCam();
+	if ( ev[ 3 ] ) cycleCam();
+	if ( ev[ 8 ] ) { openMap(); return null; }
 	if ( ev[ 1 ] ) resetCar();
 	if ( ev[ 2 ] ) audio.horn();
 	return gp;
@@ -526,7 +560,12 @@ function readInput( dt ) {
 
 		}
 
+		// right stick: look around the car
+		const rx = gp.axes[ 2 ] || 0, ry = gp.axes[ 3 ] || 0, rd = 0.15;
+		const ra = v => Math.abs( v ) < rd ? 0 : Math.sign( v ) * ( ( Math.abs( v ) - rd ) / ( 1 - rd ) ) ** 1.5;
+		if ( ra( rx ) || ra( ry ) ) orbitBy( ra( rx ) * 3.2 * dt, - ra( ry ) * 1.6 * dt );
 		const b = i => gp.buttons[ i ] || { value: 0, pressed: false };
+		if ( b( 10 ).pressed || b( 11 ).pressed ) { orbit.yaw = 0; orbit.pitch = 0; }
 		if ( b( 7 ).value > 0.03 ) gas = b( 7 ).value;
 		if ( b( 6 ).value > 0.03 ) brk = b( 6 ).value;
 		if ( b( 0 ).pressed ) hand = true;
@@ -565,6 +604,47 @@ for ( const pad of document.querySelectorAll( '#touch .pad' ) ) {
 }
 
 if ( isTouch ) document.body.classList.add( 'touch' );
+
+// ---------- mouse / touch: look around the car while driving, turn the car in the showroom ----------
+const canvasEl = $( 'c' );
+const drag = { id: null, x: 0, y: 0 };
+let showTurn = 0, showIdle = 99, showPitch = 0;
+canvasEl.addEventListener( 'pointerdown', e => {
+
+	if ( drag.id !== null && e.pointerType !== 'mouse' ) return;
+	drag.id = e.pointerId; drag.x = e.clientX; drag.y = e.clientY;
+	try { canvasEl.setPointerCapture( e.pointerId ); } catch { /* old browsers */ }
+	if ( ! inMenu && ! paused && started && e.pointerType === 'mouse' && e.button === 0 && canvasEl.requestPointerLock && ! document.pointerLockElement ) {
+
+		try { const r = canvasEl.requestPointerLock(); if ( r && r.catch ) r.catch( () => {} ); } catch { /* not allowed */ }
+
+	}
+
+} );
+const endDrag = e => { if ( e.pointerId === drag.id ) drag.id = null; };
+canvasEl.addEventListener( 'pointerup', endDrag );
+canvasEl.addEventListener( 'pointercancel', endDrag );
+addEventListener( 'pointermove', e => {
+
+	const locked = document.pointerLockElement === canvasEl;
+	let dx, dy;
+	if ( locked ) { dx = e.movementX; dy = e.movementY; }
+	else if ( e.pointerId === drag.id ) { dx = e.clientX - drag.x; dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY; }
+	else if ( e.pointerType === 'mouse' && ! e.buttons && e.target === canvasEl ) { dx = e.movementX || 0; dy = e.movementY || 0; }
+	else return;
+	if ( inMenu ) {
+
+		if ( e.pointerId !== drag.id ) return; // the showroom turns only while dragging
+		showTurn += dx * 0.012; showPitch = Math.max( - 0.15, Math.min( 0.5, showPitch + dy * 0.004 ) ); showIdle = 0;
+		return;
+
+	}
+
+	if ( paused || ! started ) return;
+	const k = e.pointerType === 'mouse' ? 0.0045 : 0.009;
+	orbitBy( - dx * k, dy * k * 0.7 );
+
+} );
 
 // ---------- audio: CC0 samples (engine loops, skid, crash, tree fall), synth fallback ----------
 const ENGINE_RPM = [ 900, 2200, 3400, 4600, 5800, 7000 ];
@@ -690,6 +770,8 @@ const audio = {
 		src.start( t, Math.random() * 0.5 ); src.stop( t + dur + 0.05 );
 
 	},
+	splash() { this.noise( 0.9, 'lowpass', 1800, 300, 0.7, 0.5 ); this.noise( 0.5, 'bandpass', 900, 250, 1.0, 0.35, 0.12 ); },
+	clack( k ) { this.noise( 0.07, 'bandpass', 900, 400, 1.6, 0.22 * k ); },
 	bov( k ) { this.noise( 0.35 + k * 0.25, 'bandpass', 4200, 1400, 1.2, 0.22 * k ); this.noise( 0.12, 'highpass', 6000, 3000, 0.7, 0.08 * k ); },
 	pop( k ) {
 
@@ -768,7 +850,7 @@ function trySpawn( dt ) {
 			const ang = i / n * Math.PI * 2;
 			const x = a.x + Math.cos( ang ) * r, z = a.z + Math.sin( ang ) * r;
 			const p = new THREE.Vector3( x, world.height( x, z ) + 1, z );
-			if ( world.normal( x, z ).y < 0.97 ) continue;
+			if ( world.normal( x, z ).y < 0.97 || roads.waterLevel( x, z ) !== null ) continue;
 			if ( world.closest( p, 4 ) || world.treesNear( x, z, 3 ).length ) continue;
 			if ( ! fallback ) fallback = p;
 			if ( world.surface( x, z ) !== 1 ) continue;
@@ -812,6 +894,47 @@ function trySpawn( dt ) {
 
 }
 
+// ---------- water: the car floats for a moment, then sinks; it comes back where it last stood on a street ----------
+const sink = { on: false, t: 0 }, safe = { x: 0, z: 0, yaw: 0, t: 0, ok: false };
+function updateWater( dt ) {
+
+	const p = vehicle.pos;
+	const wl = roads.waterLevel( p.x, p.z );
+	if ( wl !== null && p.y < wl + 0.45 ) {
+
+		if ( ! sink.on ) { sink.on = true; sink.t = 0; audio.splash(); toast( 'Auto uppus!' ); rumble( 0.8, 0.8, 300 ); }
+		sink.t += dt;
+		// water drag, and a buoyancy a little weaker than gravity: a slow sink
+		vehicle.vel.multiplyScalar( Math.exp( - dt * 2.2 ) );
+		vehicle.vel.y += 7.5 * dt;
+		vehicle.angVel.multiplyScalar( Math.exp( - dt * 2 ) );
+		if ( sink.t > 2.6 ) {
+
+			sink.on = false;
+			if ( safe.ok ) { vehicle.place( safe.x, safe.z, safe.yaw ); skids.clear(); }
+			else resetCar();
+
+		}
+
+		return;
+
+	}
+
+	sink.on = false;
+	safe.t -= dt;
+	if ( safe.t <= 0 && world.surface( p.x, p.z ) === 1 && vehicle.wheels.every( w => w.contact ) && Math.abs( vehicle.speed ) < 25 ) {
+
+		safe.t = 1; safe.ok = true;
+		// a little behind the car, so it does not drive straight back into the water
+		const f = vehicle.vel.clone().setY( 0 );
+		const back = f.lengthSq() > 1 ? f.normalize().multiplyScalar( - 6 ) : f.set( 0, 0, 0 );
+		safe.x = p.x + back.x; safe.z = p.z + back.z; safe.yaw = vehicle.yaw;
+		if ( world.surface( safe.x, safe.z ) !== 1 ) { safe.x = p.x; safe.z = p.z; }
+
+	}
+
+}
+
 let keepYaw = null;
 function resetCar() {
 
@@ -835,6 +958,15 @@ function goPlace( i ) {
 // ---------- camera ----------
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
 let camYaw = 0;
+// free look around the car: right stick, mouse or a swipe. It eases back behind the car once you let go.
+const orbit = { yaw: 0, pitch: 0, idle: 99 };
+function orbitBy( dy, dp ) {
+
+	orbit.yaw = Math.atan2( Math.sin( orbit.yaw + dy ), Math.cos( orbit.yaw + dy ) );
+	orbit.pitch = Math.max( - 0.3, Math.min( 1.1, orbit.pitch + dp ) );
+	orbit.idle = 0;
+
+}
 const _v = new THREE.Vector3();
 
 function updateCamera( dt ) {
@@ -864,22 +996,31 @@ function updateCamera( dt ) {
 	dy = Math.atan2( Math.sin( dy ), Math.cos( dy ) );
 	camYaw += dy * Math.min( 1, dt * 4 );
 	const c = CAMS[ S.cam ];
+	orbit.idle += dt;
+	if ( orbit.idle > 1.6 && Math.abs( vehicle.speed ) > 2 ) {
+
+		const k = 1 - Math.exp( - dt * 2.5 );
+		orbit.yaw -= orbit.yaw * k; orbit.pitch -= orbit.pitch * k;
+
+	}
 
 	if ( c.hood || c.bumper ) {
 
 		const q = vehicle.quat;
 		camera.position.copy( new THREE.Vector3( 0, c.hood ? 0.68 : 0.05, c.hood ? 0.35 : 2.25 ).applyQuaternion( q ).add( p ) );
-		camera.quaternion.copy( q ).multiply( new THREE.Quaternion().setFromAxisAngle( UP, Math.PI ) );
-		camera.rotateX( - 0.05 );
+		camera.quaternion.copy( q ).multiply( new THREE.Quaternion().setFromAxisAngle( UP, Math.PI + orbit.yaw ) );
+		camera.rotateX( - 0.05 - orbit.pitch * 0.6 );
 		camera.fov = c.hood ? 70 : 74;
 		camera.updateProjectionMatrix();
 		return;
 
 	}
 
-	const f = new THREE.Vector3( Math.sin( camYaw ), 0, Math.cos( camYaw ) );
+	const oy = camYaw + orbit.yaw;
+	const f = new THREE.Vector3( Math.sin( oy ), 0, Math.cos( oy ) );
 	const sp = Math.abs( vehicle.speed );
-	const want = p.clone().addScaledVector( f, - c.back - sp * 0.04 ).addScaledVector( UP, c.up );
+	const arm = Math.hypot( c.back + sp * 0.04, c.up ), el = Math.max( 0.04, Math.min( 1.45, Math.atan2( c.up, c.back + sp * 0.04 ) + orbit.pitch ) );
+	const want = p.clone().addScaledVector( f, - arm * Math.cos( el ) ).addScaledVector( UP, arm * Math.sin( el ) );
 	const from = p.clone().addScaledVector( UP, 1.4 );
 	const to = want.clone().sub( from );
 	const dist = to.length();
@@ -889,7 +1030,7 @@ function updateCamera( dt ) {
 	const gy = world.height( want.x, want.z ) + 0.8;
 	if ( want.y < gy ) want.y = gy;
 
-	camPos.lerp( want, 1 - Math.exp( - dt * 8 ) );
+	camPos.lerp( want, 1 - Math.exp( - dt * ( orbit.idle < 0.3 ? 20 : 8 ) ) );
 	camLook.lerp( p.clone().addScaledVector( UP, 0.9 ).addScaledVector( f, c.look ), 1 - Math.exp( - dt * 14 ) );
 	camera.position.copy( camPos );
 	if ( vehicle.impact > 0.02 ) {
@@ -986,30 +1127,147 @@ function drawTacho() {
 
 }
 
-function renderMinimap() {
+// ---------- maps ----------
+const mini = new TileMap( $( 'mini' ), { labels: true, rotate: true } );
+const big = new TileMap( $( 'bigc' ), { labels: true, rotate: false } );
+big.places = PLACES.map( p => { const { E, N } = toLest( p.lat, p.lon ); return { name: p.name, E, N }; } );
+big.cursor = true;
+let mapOpen = false, miniT = 0;
+function renderMinimap( dt ) {
 
-	const fr = $( 'mapframe' ).getBoundingClientRect();
-	const size = fr.width;
-	const x = fr.left, y = innerHeight - fr.bottom;
-	const p = vehicle.pos;
-	mapCam.position.set( p.x, p.y + 600, p.z );
-	mapCam.up.set( Math.sin( camYaw ), 0, Math.cos( camYaw ) );
-	mapCam.lookAt( p.x, p.y, p.z );
-	marker.position.set( p.x, p.y + 40, p.z );
-	marker.rotation.y = vehicle.yaw;
-	const fog = scene.fog;
-	scene.fog = null;
-	const se = renderer.shadowMap.enabled;
-	renderer.shadowMap.autoUpdate = false;
-	renderer.setScissorTest( true );
-	renderer.setScissor( x, y, size, size );
-	renderer.setViewport( x, y, size, size );
-	renderer.clear();
-	renderer.render( scene, mapCam );
-	renderer.setScissorTest( false );
-	renderer.setViewport( 0, 0, innerWidth, innerHeight );
-	renderer.shadowMap.autoUpdate = se;
-	scene.fog = fog;
+	miniT -= dt;
+	if ( miniT > 0 ) return;
+	miniT = 1 / 30;
+	const { E, N } = worldToEN( vehicle.pos.x, vehicle.pos.z );
+	mini.E = E; mini.N = N;
+	mini.mpp = 340 / Math.max( 60, $( 'mapframe' ).clientWidth );
+	mini.heading = Math.PI - ( camYaw + orbit.yaw );
+	mini.car = { E, N, yaw: vehicle.yaw };
+	mini.draw();
+
+}
+
+function openMap() {
+
+	if ( ! started || inMenu || spawning || paused ) return;
+	mapOpen = true;
+	keys.clear();
+	if ( document.pointerLockElement ) document.exitPointerLock();
+	$( 'bigmap' ).style.display = 'block';
+	const { E, N } = worldToEN( vehicle.pos.x, vehicle.pos.z );
+	big.E = E; big.N = N; big.mpp = 2.2;
+	big.car = { E, N, yaw: vehicle.yaw };
+	$( 'bigmap' ).querySelector( '.title small' ).textContent = isTouch ? 'Puuduta kohta, kuhu tahad sõita' : 'Kliki kohta, kuhu tahad sõita';
+	$( 'bm-tip' ).innerHTML = isTouch ? 'Lohista · näpista suumiks · <b>puuduta kohta</b> = teleport' : padSeen ? 'Kang liigutab · RT/LT suumib · <b>A</b> = teleport · <b>B</b> sulgeb' : 'Lohista · rullik suumib · <b>kliki</b> = teleport · <b>M</b> sulgeb';
+
+}
+
+function closeMap() {
+
+	mapOpen = false;
+	keys.clear();
+	$( 'bigmap' ).style.display = 'none';
+	last = performance.now();
+
+}
+
+function teleport( E, N ) {
+
+	let { x, z } = enToWorld( E, N );
+	const r = Math.hypot( x, z ), lim = BOUNDARY - 60;
+	if ( r > lim ) { x *= lim / r; z *= lim / r; }
+	closeMap();
+	keepYaw = null;
+	spawnAt( new THREE.Vector3( x, 0, z ) );
+	toast( 'Teleport' );
+
+}
+
+{
+
+	// big map: drag to pan, wheel / pinch to zoom, click or tap to teleport
+	const c = $( 'bigc' ), pts = new Map();
+	let moved = 0, pinch = 0;
+	c.addEventListener( 'pointerdown', e => { try { c.setPointerCapture( e.pointerId ); } catch { /* synthetic */ } pts.set( e.pointerId, [ e.clientX, e.clientY ] ); moved = pts.size > 1 ? 99 : 0; pinch = 0; } );
+	c.addEventListener( 'pointermove', e => {
+
+		const p = pts.get( e.pointerId );
+		if ( ! p ) return;
+		const dx = e.clientX - p[ 0 ], dy = e.clientY - p[ 1 ];
+		if ( pts.size === 1 ) { big.pan( dx, dy ); moved += Math.abs( dx ) + Math.abs( dy ); }
+		else {
+
+			const [ a, b ] = [ ...pts.values() ];
+			const d0 = Math.hypot( a[ 0 ] - b[ 0 ], a[ 1 ] - b[ 1 ] );
+			p[ 0 ] = e.clientX; p[ 1 ] = e.clientY;
+			const d1 = Math.hypot( a[ 0 ] - b[ 0 ], a[ 1 ] - b[ 1 ] );
+			if ( d0 > 10 && d1 > 10 ) { const r = c.getBoundingClientRect(); big.zoomAt( d0 / d1, ( a[ 0 ] + b[ 0 ] ) / 2 - r.left, ( a[ 1 ] + b[ 1 ] ) / 2 - r.top ); }
+			pinch = 1;
+			return;
+
+		}
+
+		p[ 0 ] = e.clientX; p[ 1 ] = e.clientY;
+
+	} );
+	const up = e => {
+
+		const had = pts.delete( e.pointerId );
+		if ( had && e.type === 'pointerup' && moved < 8 && ! pinch && pts.size === 0 ) {
+
+			const r = c.getBoundingClientRect(), p = big.toEN( e.clientX - r.left, e.clientY - r.top );
+			teleport( p.E, p.N );
+
+		}
+
+	};
+	c.addEventListener( 'pointerup', up );
+	c.addEventListener( 'pointercancel', up );
+	c.addEventListener( 'wheel', e => { e.preventDefault(); const r = c.getBoundingClientRect(); big.zoomAt( Math.exp( e.deltaY * 0.0015 ), e.clientX - r.left, e.clientY - r.top ); }, { passive: false } );
+	$( 'bm-in' ).onclick = () => big.zoomAt( 0.6 );
+	$( 'bm-out' ).onclick = () => big.zoomAt( 1 / 0.6 );
+	$( 'bm-x' ).onclick = () => closeMap();
+	$( 'bm-car' ).onclick = () => { const p = worldToEN( vehicle.pos.x, vehicle.pos.z ); big.E = p.E; big.N = p.N; };
+	$( 'mapframe' ).addEventListener( 'pointerdown', e => { e.stopPropagation(); e.preventDefault(); openMap(); } );
+
+}
+
+function updateBigMap( dt ) {
+
+	const k = c => keys.has( c );
+	const px = ( k( 'ArrowLeft' ) || k( 'KeyA' ) ? 1 : 0 ) - ( k( 'ArrowRight' ) || k( 'KeyD' ) ? 1 : 0 );
+	const py = ( k( 'ArrowUp' ) || k( 'KeyW' ) ? 1 : 0 ) - ( k( 'ArrowDown' ) || k( 'KeyS' ) ? 1 : 0 );
+	if ( px || py ) big.pan( px * 600 * dt, py * 600 * dt );
+	big.draw();
+
+}
+
+// ---------- frame rate: counter, and render resolution that follows the device ----------
+const MAX_PR = Math.min( window.devicePixelRatio, isTouch ? 1.5 : 1.75 );
+let pr = Math.min( MAX_PR, isTouch ? 1.25 : 1.75 ), fpsN = 0, fpsT = 0, fpsAvg = 60, adaptT = 0, adaptN = 0;
+renderer.setPixelRatio( pr );
+function frameStats( dt, playing ) {
+
+	fpsN ++; fpsT += dt;
+	if ( fpsT >= 0.5 ) {
+
+		fpsAvg = fpsN / fpsT;
+		const el = $( 'fps' );
+		el.textContent = Math.round( fpsAvg ) + ' FPS';
+		el.classList.toggle( 'low', fpsAvg < 28 );
+		fpsN = 0; fpsT = 0;
+
+	}
+
+	if ( ! playing ) { adaptT = 0; adaptN = 0; return; }
+	adaptT += dt; adaptN ++;
+	if ( adaptT < 2.5 ) return;
+	const f = adaptN / adaptT;
+	adaptT = 0; adaptN = 0;
+	let np = pr;
+	if ( f < 30 ) np = Math.max( 0.6, pr - ( f < 22 ? 0.25 : 0.12 ) );
+	else if ( f > 54 ) np = Math.min( MAX_PR, pr + 0.1 );
+	if ( Math.abs( np - pr ) > 0.01 ) { pr = np; renderer.setPixelRatio( pr ); renderer.setSize( innerWidth, innerHeight ); }
 
 }
 
@@ -1056,8 +1314,9 @@ async function startGame() {
 		const d = S.detail;
 		world.radius = d;
 		roads.radius = d === 2 ? 1 : 2;
-		facades.radius = d === 2 ? 140 : 200;
-		facades.maxTex = d === 2 ? 512 : 1024;
+		facades.radius = d === 2 ? 170 : 330;
+		facades.sharp = d !== 2; // the sharpening costs four extra texture reads: computers only
+		facades.maxTex = d === 2 ? 1024 : 4096; // photo facades at full resolution on computers
 		scene.fog.far = d === 2 ? 850 : 1250;
 		scene.fog.near = d === 2 ? 300 : 450;
 		const sz = d === 2 ? 1024 : 2048, ext = d === 2 ? 55 : 85;
@@ -1085,11 +1344,12 @@ const _side = new THREE.Vector3();
 function loop( now ) {
 
 	requestAnimationFrame( loop );
-	const dt = Math.min( 0.05, ( now - last ) / 1000 );
+	const dt = Math.min( 0.1, ( now - last ) / 1000 );
 	last = now;
 
 	if ( inMenu ) {
 
+		frameStats( dt, false );
 		pollPad( dt );
 		if ( audio.ctx ) audio.update( 900, 0, 0, 0, 0, true );
 		renderShowroom( dt );
@@ -1099,14 +1359,24 @@ function loop( now ) {
 
 	if ( ! started ) { pollPad( dt ); renderShowroom( dt ); return; }
 
+	if ( mapOpen ) {
+
+		pollPad( dt );
+		frameStats( dt, false );
+		if ( audio.ctx ) audio.update( vehicle.rpm, 0, 0, 0, 0, true );
+		updateBigMap( dt );
+		return;
+
+	}
+
 	const input = readInput( dt );
+	frameStats( dt, ! paused && ! spawning );
 	if ( paused ) {
 
 		if ( audio.ctx ) audio.update( vehicle.rpm, 0, 0, 0, 0, true );
 		renderer.setViewport( 0, 0, innerWidth, innerHeight );
 		renderer.clear();
 		renderer.render( scene, camera );
-		if ( ! spawning ) renderMinimap();
 		return;
 
 	}
@@ -1115,7 +1385,8 @@ function loop( now ) {
 	else {
 
 		vehicle.update( dt, input );
-		if ( vehicle.pos.y < world.height( vehicle.pos.x, vehicle.pos.z ) - 6 ) resetCar();
+		updateWater( dt );
+		if ( vehicle.pos.y < world.height( vehicle.pos.x, vehicle.pos.z ) - 6 && ! sink.on ) resetCar();
 		// city limit: the grid wall pushes the car back
 		const r = Math.hypot( vehicle.pos.x, vehicle.pos.z );
 		if ( r > BOUNDARY - 2.4 ) {
@@ -1156,6 +1427,10 @@ function loop( now ) {
 		v.spin.rotation.x += w.omega * dt;
 		// tyre marks on hard surfaces
 		const hard = w.surf === 1 || w.surf === 2 || w.surf === 4;
+		// clack over tram and train rails
+		const rb = w.contact && w.cp ? roads.railBump( w.cp.x, w.cp.z ) : 0;
+		if ( rb > 0.012 && ! w.onRail && Math.abs( vehicle.speed ) > 1.5 ) { audio.clack( Math.min( 1, Math.abs( vehicle.speed ) / 15 ) ); if ( i === 0 ) rumble( 0.25, 0.4, 60 ); }
+		w.onRail = rb > 0.012;
 		if ( ! spawning && w.contact && hard && w.slide > 0.32 && w.cp ) skids.add( i, w.cp, _side, Math.min( 1, ( w.slide - 0.25 ) * 2 ), w.cp.y + 0.02 );
 		else skids.add( i, null, null, 0 );
 
@@ -1182,12 +1457,13 @@ function loop( now ) {
 
 	updateCamera( dt );
 	sky.position.copy( camera.position );
+	sky.material.uniforms.uTime.value += dt;
 	placeSun();
 
 	renderer.setViewport( 0, 0, innerWidth, innerHeight );
 	renderer.clear();
 	renderer.render( scene, camera );
-	if ( ! spawning ) renderMinimap();
+	if ( ! spawning ) renderMinimap( dt );
 	drawTacho();
 
 }
@@ -1201,4 +1477,4 @@ openMenu();
 requestAnimationFrame( loop );
 
 // test hooks
-window.__game = { vehicle, world, roads, facades, ctl, keys, skids, CAR_SPECS, S, selectCar, setPaused, startGame, cycle, get car() { return car; }, get spawning() { return spawning; }, get paused() { return paused; } };
+window.__game = { renderer, scene, camera, sun, openMap, closeMap, teleport, big, mini, orbit, get mapOpen() { return mapOpen; }, vehicle, world, roads, facades, ctl, keys, skids, CAR_SPECS, S, selectCar, setPaused, startGame, cycle, get car() { return car; }, get spawning() { return spawning; }, get paused() { return paused; } };

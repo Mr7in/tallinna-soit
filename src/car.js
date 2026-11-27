@@ -39,7 +39,7 @@ const DEFS = {
 	},
 
 	touring: {
-		name: 'Touring FWD', colors: [ 0xf1f1ee, 0x10254f, 0xb81d24, 0x2a2c31, 0x1d5fa8 ], accent: 0x1d3f9c,
+		name: 'Touring FWD', colors: [ 0xf1f1ee, 0x10254f, 0xb81d24, 0x2a2c31, 0xd9a31a ], accent: 0x1d3f9c,
 		zR: - 2.35, zF: 2.36, axle: [ 1.02, - 1.64 ], track: 0.735, tyreR: 0.32, archR: 0.4, sill: 0.15,
 		belt: [ [ - 2.35, 0.95 ], [ - 2.3, 0.99 ], [ - 1.3, 0.99 ], [ 0.95, 0.95 ], [ 1.75, 0.84 ], [ 2.26, 0.78 ], [ 2.36, 0.62 ] ],
 		hw: [ [ - 2.35, 0.84 ], [ - 2.28, 0.88 ], [ - 1.3, 0.895 ], [ 0, 0.87 ], [ 1.36, 0.895 ], [ 2.22, 0.87 ], [ 2.36, 0.8 ] ],
@@ -70,6 +70,52 @@ export const CAR_IDS = Object.keys( DEFS );
 //   touring - "Volvo 850 T5 R Estate 1995" by szymonpasterczyk
 //   coupe   - "BMW M3 Coupe (E30) 1986" by Lexyc16
 const MODELS = {};
+
+// Estonian number plates: front and rear plate centre (height, z) in the body frame of each model
+const PLATES = { rally: { f: [ 0.47, 1.975 ], r: [ 0.66, - 2.345 ] }, touring: { f: [ 0.42, 1.922 ], r: [ 0.74, - 2.681 ] }, coupe: { f: [ 0.4, 2.021 ], r: [ 0.605, - 2.19 ] } };
+const plateText = id => {
+
+	// one random plate per car, kept in this browser: three digits and three letters ("123 ABC")
+	const key = 'tsoit2.plate.' + id;
+	try { const v = localStorage.getItem( key ); if ( v ) return v; } catch { /* private mode */ }
+	const L = 'ABCDEFGHJKLMNOPRSTUVXYZ', r = n => Math.floor( Math.random() * n );
+	const t = String( 100 + r( 900 ) ) + ' ' + L[ r( L.length ) ] + L[ r( L.length ) ] + L[ r( L.length ) ];
+	try { localStorage.setItem( key, t ); } catch { /* private mode */ }
+	return t;
+
+};
+const plateTex = new Map();
+function plateTexture( text ) {
+
+	if ( plateTex.has( text ) ) return plateTex.get( text );
+	const c = document.createElement( 'canvas' );
+	c.width = 1040; c.height = 224;
+	const x = c.getContext( '2d' );
+	x.fillStyle = '#fbfbf6'; x.fillRect( 0, 0, 1040, 224 );
+	x.lineWidth = 10; x.strokeStyle = '#111'; x.strokeRect( 7, 7, 1026, 210 );
+	// EU band: blue, ring of stars, country code
+	x.fillStyle = '#1d3f9e'; x.fillRect( 12, 12, 108, 200 );
+	x.fillStyle = '#ffd200';
+	for ( let i = 0; i < 12; i ++ ) {
+
+		const a = i / 12 * Math.PI * 2, sx = 66 + Math.cos( a ) * 30, sy = 66 + Math.sin( a ) * 30;
+		x.beginPath();
+		for ( let k = 0; k < 10; k ++ ) { const r = k % 2 ? 3 : 7, b = - Math.PI / 2 + k * Math.PI / 5; x.lineTo( sx + Math.cos( b ) * r, sy + Math.sin( b ) * r ); }
+		x.fill();
+
+	}
+
+	x.fillStyle = '#fff'; x.font = '700 50px "Barlow Condensed", Arial, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+	x.fillText( 'EST', 66, 166 );
+	x.fillStyle = '#111'; x.font = '700 176px "Barlow Condensed", "Arial Narrow", Arial, sans-serif';
+	x.fillText( text, 580, 120, 860 );
+	const t = new THREE.CanvasTexture( c );
+	t.colorSpace = THREE.SRGBColorSpace;
+	t.anisotropy = 8;
+	plateTex.set( text, t );
+	return t;
+
+}
 export const carModelsReady = ( async () => {
 
 	const loader = new GLTFLoader();
@@ -420,6 +466,21 @@ export function buildCar( id = 'rally', colorIndex = 0 ) {
 
 		const box = new THREE.Box3().setFromObject( src );
 		flame.position.set( D.exhaust[ 0 ][ 0 ], 0.28, box.min.z - 0.02 );
+		const P = PLATES[ id ];
+		if ( P ) {
+
+			const mat = new THREE.MeshStandardMaterial( { map: plateTexture( plateText( id ) ), roughness: 0.45, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: - 2, polygonOffsetUnits: - 4 } );
+			const geo = new THREE.PlaneGeometry( 0.52, 0.112 );
+			for ( const [ y, z, back ] of [ [ ...P.f, false ], [ ...P.r, true ] ] ) {
+
+				const m = new THREE.Mesh( geo, mat );
+				m.position.set( 0, y, z );
+				if ( back ) m.rotation.y = Math.PI;
+				body.add( m );
+
+			}
+
+		}
 
 	}
 

@@ -402,6 +402,30 @@ function models() {
 }
 
 const LENS = [ [ 3.33, 0xff2a1a ], [ 3.0, 0xffb000 ], [ 2.67, 0x29e05a ] ];
+export const SEA_LEVEL = 0.0;
+const WATER_GEO = new THREE.PlaneGeometry( 250, 250, 1, 1 ).rotateX( - Math.PI / 2 );
+// water: dark green-blue, glossy, with small moving ripples; the mask texture cuts out the shore
+function waterMaterial( mask, time, env ) {
+
+	const m = new THREE.MeshStandardMaterial( { color: 0x23424c, roughness: 0.06, metalness: 0.1, transparent: true, opacity: 0.88, alphaMap: mask, alphaTest: 0.5, envMap: env || null, envMapIntensity: 0.9, depthWrite: true } );
+	m.onBeforeCompile = s => {
+
+		s.uniforms.uTime = time;
+		s.vertexShader = s.vertexShader.replace( '#include <common>', '#include <common>\nvarying vec3 vWp;' ).replace( '#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWp = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;' );
+		s.fragmentShader = s.fragmentShader
+			.replace( '#include <common>', '#include <common>\nvarying vec3 vWp;\nuniform float uTime;' )
+			.replace( '#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+				vec2 q = vWp.xz;
+				float a = sin( q.x * 0.71 + q.y * 0.23 + uTime * 1.3 ) + sin( q.y * 1.13 - q.x * 0.31 - uTime * 1.1 ) + 0.5 * sin( q.x * 2.37 + q.y * 1.61 + uTime * 2.1 ) + 0.3 * sin( q.x * 4.1 - q.y * 3.3 - uTime * 2.9 );
+				float b = cos( q.x * 1.07 - q.y * 0.37 - uTime * 1.2 ) + cos( q.y * 0.83 + q.x * 0.41 + uTime * 1.4 ) + 0.5 * cos( q.x * 1.9 - q.y * 2.6 + uTime * 1.9 ) + 0.3 * cos( q.y * 4.3 + q.x * 2.9 + uTime * 3.1 );
+				float fade = 1.0 / ( 1.0 + length( vViewPosition ) * 0.02 ); // calmer far away, no moire
+				normal = normalize( normal + ( viewMatrix * vec4( a * 0.018 * fade, 0.0, b * 0.018 * fade, 0.0 ) ).xyz );` );
+
+	};
+
+	return m;
+
+}
 const DIM = 0.13;
 
 export class Roads {
@@ -420,15 +444,19 @@ export class Roads {
 		this.onPropFall = null;
 		const T = textures();
 		this.mats = {
-			asphalt: surfaceMat( T.asphalt, - 2, - 8 ),
-			parking: surfaceMat( T.asphalt, - 1, - 6 ),
-			paving: surfaceMat( T.paving, - 2, - 6 ),
-			cobble: surfaceMat( T.cobble, - 2, - 8 ),
-			gravel: surfaceMat( T.gravel, - 1, - 5 ),
-			kerb: new THREE.MeshLambertMaterial( { color: 0xb9b7b0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: - 2, polygonOffsetUnits: - 7 } ),
-			mark: new THREE.MeshLambertMaterial( { color: 0xf3f3ee, side: THREE.DoubleSide, emissive: 0x303030, polygonOffset: true, polygonOffsetFactor: - 4, polygonOffsetUnits: - 16 } ),
+			// small offsets only: a large polygon offset pulls the street in front of the wheels at low camera angles
+			asphalt: surfaceMat( T.asphalt, - 0.5, - 4 ),
+			parking: surfaceMat( T.asphalt, - 0.25, - 3 ),
+			paving: surfaceMat( T.paving, - 0.5, - 3 ),
+			cobble: surfaceMat( T.cobble, - 0.5, - 4 ),
+			gravel: surfaceMat( T.gravel, - 0.25, - 2 ),
+			kerb: new THREE.MeshLambertMaterial( { color: 0xb9b7b0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: - 0.5, polygonOffsetUnits: - 4 } ),
+			mark: new THREE.MeshLambertMaterial( { color: 0xf3f3ee, side: THREE.DoubleSide, emissive: 0x303030, polygonOffset: true, polygonOffsetFactor: - 1, polygonOffsetUnits: - 8 } ),
 		};
 		this.mats.parking.color.setHex( 0xe6e6e6 );
+		this.mats.rail = new THREE.MeshLambertMaterial( { color: 0xc4c8cc, emissive: 0x2a2c2e, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: - 1, polygonOffsetUnits: - 8 } );
+		this.mats.sleeper = new THREE.MeshLambertMaterial( { color: 0x5b4b3d, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: - 0.5, polygonOffsetUnits: - 4 } );
+		this.time = { value: 0 };
 
 	}
 
@@ -460,7 +488,7 @@ export class Roads {
 
 	load( key ) {
 
-		const c = { alive: true, group: null, props: [], signals: [] };
+		const c = { key, alive: true, group: null, props: [], signals: [] };
 		const man = this.world.manifest, [ kx, ky ] = key.split( '_' ).map( Number );
 		c.e0 = man.gridE + kx * man.chunk; c.n0 = man.gridN + ky * man.chunk;
 		this.chunks.set( key, c );
@@ -482,11 +510,12 @@ export class Roads {
 
 	build( c, d ) {
 
-		const W = this.world;
+		const W = this.world, key = c.key;
 		const g = new THREE.Group();
 		const B = {
 			asphalt: new Builder( W, 4 ), parking: new Builder( W, 4 ), paving: new Builder( W, 2.4 ), cobble: new Builder( W, 2 ),
 			gravel: new Builder( W, 3 ), kerb: new Builder( W, 1 ), mark: new Builder( W, 1 ),
+			rail: new Builder( W, 1 ), sleeper: new Builder( W, 1 ),
 		};
 		// junction lookup (this chunk); markings and kerbs stop short of junctions
 		const J = d.j || [];
@@ -591,7 +620,7 @@ export class Roads {
 
 		for ( const w of d.w || [] ) {
 
-			const [ kind, width, lanes, oneway, bridge, side, surf, flat ] = w;
+			const [ kind, width, lanes, oneway, bridge, side, surf, flat ] = w, lanesF = w[ 8 ] || 0;
 			const pts = [];
 			for ( let k = 0; k < flat.length; k += 2 ) pts.push( [ flat[ k ], flat[ k + 1 ] ] );
 			const hw = width / 2;
@@ -620,22 +649,43 @@ export class Roads {
 
 			}
 
-			// lane markings
-			if ( width < 5.5 || surf ) continue;
+			// lane markings. Lane widths follow the lane count; with lanes:forward / lanes:backward tagged the
+			// centre line sits between the two directions (right-hand traffic: forward lanes on the right).
+			if ( surf || width < 4.6 ) continue;
 			const L = Math.max( 1, lanes );
 			const lw = 0.13;
 			const dashed = ( period, on ) => ( x, z, s ) => ( s % period ) < on && ! nearJ( x, z, 3 );
 			const solid = ( x, z ) => ! nearJ( x, z, 3 );
-			const line = ( off, keep ) => { for ( const r of runs( pts, keep ) ) B.mark.strip( r, off - lw / 2, off + lw / 2, 0.075, 2 ); };
+			const line = ( off, keep, wd = lw ) => { for ( const r of runs( pts, keep ) ) B.mark.strip( r, off - wd / 2, off + wd / 2, 0.075, 2 ); };
+			if ( width < 5.5 ) {
+
+				// small two-way street: a light dashed centre line
+				if ( ! oneway ) line( 0, dashed( 6, 1.5 ), 0.1 );
+				continue;
+
+			}
+
+			const laneW = width / L;
 			if ( oneway ) {
 
-				for ( let k = 1; k < L; k ++ ) line( - hw + width * k / L, dashed( 9, 3 ) );
+				for ( let k = 1; k < L; k ++ ) line( - hw + laneW * k, dashed( 9, 3 ) );
 
 			} else {
 
-				const per = Math.max( 1, Math.floor( L / 2 ) );
-				if ( L >= 4 ) { line( - 0.12, solid ); line( 0.12, solid ); } else line( 0, dashed( 9, 3 ) );
-				for ( let k = 1; k < per; k ++ ) { line( hw * k / per, dashed( 9, 3 ) ); line( - hw * k / per, dashed( 9, 3 ) ); }
+				if ( lanesF > 0 && lanesF < L ) {
+
+					const mid = - hw + laneW * lanesF;
+					if ( L >= 4 ) { line( mid - 0.12, solid ); line( mid + 0.12, solid ); } else line( mid, dashed( 9, 3 ) );
+					for ( let k = 1; k < lanesF; k ++ ) line( - hw + laneW * k, dashed( 9, 3 ) );
+					for ( let k = 1; k < L - lanesF; k ++ ) line( mid + laneW * k, dashed( 9, 3 ) );
+
+				} else {
+
+					const per = Math.max( 1, Math.floor( L / 2 ) );
+					if ( L >= 4 ) { line( - 0.12, solid ); line( 0.12, solid ); } else line( 0, dashed( 9, 3 ) );
+					for ( let k = 1; k < per; k ++ ) { line( hw * k / per, dashed( 9, 3 ) ); line( - hw * k / per, dashed( 9, 3 ) ); }
+
+				}
 
 			}
 
@@ -666,7 +716,55 @@ export class Roads {
 
 		}
 
-		const order = { parking: 1, gravel: 1, paving: 2, cobble: 2, asphalt: 3, kerb: 4, mark: 5 };
+		// ---- railways and tram lines: rails you can see and feel ----
+		const rails = [];
+		for ( const piece of d.r || [] ) {
+
+			const g = piece[ 0 ], street = piece[ 1 ], pts = [];
+			for ( let k = 2; k + 1 < piece.length; k += 2 ) pts.push( [ piece[ k ], piece[ k + 1 ] ] );
+			if ( pts.length < 2 ) continue;
+			const hg = g / 2 + 0.036;
+			if ( ! street ) {
+
+				// ballast bed and sleepers
+				B.gravel.strip( pts, - hg - 1.0, hg + 1.0, 0.085, 3 );
+				for ( let k = 0; k + 1 < pts.length; k ++ ) fillSeg( pts[ k ][ 0 ], pts[ k ][ 1 ], pts[ k + 1 ][ 0 ], pts[ k + 1 ][ 1 ], hg + 1.0, 3 );
+				for ( const r of runs( pts, ( x, z, sd ) => true, 0.65 ) ) for ( let k = 0; k + 1 < r.length; k ++ ) {
+
+					const ax = r[ k + 1 ][ 0 ] - r[ k ][ 0 ], az = r[ k + 1 ][ 1 ] - r[ k ][ 1 ], l = Math.hypot( ax, az ) || 1;
+					B.sleeper.rect( r[ k ][ 0 ], r[ k ][ 1 ], ax / l, az / l, 0.12, hg + 0.32, 0.12 );
+
+				}
+
+			}
+
+			const top = street ? 0.085 : 0.2;
+			for ( const sd of [ - 1, 1 ] ) B.rail.strip( pts, sd * hg - 0.036, sd * hg + 0.036, top, 2 );
+			for ( let k = 0; k + 1 < pts.length; k ++ ) rails.push( pts[ k ][ 0 ], pts[ k ][ 1 ], pts[ k + 1 ][ 0 ], pts[ k + 1 ][ 1 ], hg, street );
+
+		}
+
+		if ( rails.length ) {
+
+			// 8 m grid of rail segments for the bump under the wheels
+			c.rails = rails;
+			c.railGrid = new Map();
+			for ( let q = 0; q < rails.length; q += 6 ) {
+
+				const [ ax, az, bx, bz ] = rails.slice( q, q + 4 );
+				for ( let gx = Math.floor( ( Math.min( ax, bx ) - 1 ) / 8 ); gx <= Math.floor( ( Math.max( ax, bx ) + 1 ) / 8 ); gx ++ ) for ( let gz = Math.floor( ( Math.min( az, bz ) - 1 ) / 8 ); gz <= Math.floor( ( Math.max( az, bz ) + 1 ) / 8 ); gz ++ ) {
+
+					const k = gx + ',' + gz;
+					if ( ! c.railGrid.has( k ) ) c.railGrid.set( k, [] );
+					c.railGrid.get( k ).push( q );
+
+				}
+
+			}
+
+		}
+
+		const order = { parking: 1, gravel: 1, paving: 2, cobble: 2, asphalt: 3, kerb: 4, mark: 5, rail: 5, sleeper: 2 };
 		for ( const k in B ) {
 
 			const m = B[ k ].mesh( this.mats[ k ], order[ k ] );
@@ -692,8 +790,11 @@ export class Roads {
 		}
 
 		c.surf = ras;
+		this.buildWater( c, d.wt || [], ras, g );
 		c.group = g;
 		this.group.add( g );
+		const wc = W.chunks.get( key );
+		if ( wc ) W.cullTrees( wc );
 		W.resinkGround( ox - 5, oz - N - 5, ox + N + 5, oz + 5 );
 
 	}
@@ -804,6 +905,108 @@ export class Roads {
 
 	}
 
+	// ---- water: the sea (low terrain) and the lakes, ponds and rivers of OpenStreetMap ----
+	buildWater( c, polys, ras, g ) {
+
+		const N = 250, W = this.world, ox = c.e0 - ORIGIN_E, oz = - ( c.n0 - ORIGIN_N );
+		const water = new Uint8Array( N * N ), levels = [];
+		// sea: where the terrain model has no land (it is filled with -0.4 m there)
+		let sea = false;
+		for ( let j = 0; j < N; j += 1 ) for ( let i = 0; i < N; i += 1 ) {
+
+			if ( W.heightRaw( ox + i + 0.5, oz - j - 0.5 ) < - 0.2 ) { water[ j * N + i ] = 1; sea = true; }
+
+		}
+
+		if ( sea ) levels.push( SEA_LEVEL );
+		for ( const [ level, ...rings ] of polys ) {
+
+			let li = levels.indexOf( level );
+			if ( li < 0 ) { if ( levels.length >= 254 ) continue; levels.push( level ); li = levels.length - 1; }
+			const R = rings.map( f => { const P = []; for ( let k = 0; k + 1 < f.length; k += 2 ) P.push( [ f[ k ] - ox, oz - f[ k + 1 ] ] ); return P; } );
+			let i0 = N, i1 = 0, j0 = N, j1 = 0;
+			for ( const P of R ) for ( const [ a, b ] of P ) { i0 = Math.min( i0, a ); i1 = Math.max( i1, a ); j0 = Math.min( j0, b ); j1 = Math.max( j1, b ); }
+			for ( let j = Math.max( 0, Math.floor( j0 ) ); j <= Math.min( N - 1, Math.ceil( j1 ) ); j ++ ) {
+
+				const py = j + 0.5;
+				for ( let i = Math.max( 0, Math.floor( i0 ) ); i <= Math.min( N - 1, Math.ceil( i1 ) ); i ++ ) {
+
+					const px = i + 0.5;
+					let inside = false;
+					for ( const P of R ) for ( let a = 0, b = P.length - 1; a < P.length; b = a ++ ) {
+
+						if ( ( P[ a ][ 1 ] > py ) !== ( P[ b ][ 1 ] > py ) && px < ( P[ b ][ 0 ] - P[ a ][ 0 ] ) * ( py - P[ a ][ 1 ] ) / ( P[ b ][ 1 ] - P[ a ][ 1 ] ) + P[ a ][ 0 ] ) inside = ! inside;
+
+					}
+
+					if ( inside ) water[ j * N + i ] = li + 1;
+
+				}
+
+			}
+
+		}
+
+		if ( ! levels.length ) return;
+		// streets and paths stay dry (bridge decks are drawn over the water)
+		for ( let k = 0; k < N * N; k ++ ) if ( ras[ k ] ) water[ k ] = 0;
+		c.water = water; c.levels = levels;
+		levels.forEach( ( level, li ) => {
+
+			const data = new Uint8Array( N * N * 4 );
+			let any = false;
+			for ( let k = 0; k < N * N; k ++ ) if ( water[ k ] === li + 1 ) { data[ k * 4 + 1 ] = 255; any = true; }
+			if ( ! any ) return;
+			const mask = new THREE.DataTexture( data, N, N );
+			mask.magFilter = THREE.LinearFilter; mask.minFilter = THREE.LinearFilter; mask.needsUpdate = true;
+			const m = new THREE.Mesh( WATER_GEO, waterMaterial( mask, this.time, this.env ) );
+			m.position.set( ox + N / 2, level, oz - N / 2 );
+			m.renderOrder = 7;
+			m.userData.sh = 1;
+			m.userData.water = true;
+			g.add( m );
+
+		} );
+
+	}
+
+	waterLevel( x, z ) {
+
+		const r = this.rasterAt( x, z );
+		if ( ! r || ! r[ 0 ].water ) return null;
+		const v = r[ 0 ].water[ r[ 1 ] ];
+		return v ? r[ 0 ].levels[ v - 1 ] : null;
+
+	}
+
+	// height of a rail head under (x, z): a short rounded ridge, so the car bumps over tram and train tracks
+	railBump( x, z ) {
+
+		const man = this.world.manifest;
+		if ( ! man ) return 0;
+		const E = x + ORIGIN_E, Nn = - z + ORIGIN_N;
+		const c = this.chunks.get( Math.floor( ( E - man.gridE ) / man.chunk ) + '_' + Math.floor( ( Nn - man.gridN ) / man.chunk ) );
+		if ( ! c || ! c.railGrid ) return 0;
+		const L = c.railGrid.get( Math.floor( x / 8 ) + ',' + Math.floor( z / 8 ) );
+		if ( ! L ) return 0;
+		const R = c.rails;
+		let h = 0;
+		for ( const q of L ) {
+
+			const ax = R[ q ], az = R[ q + 1 ], dx = R[ q + 2 ] - ax, dz = R[ q + 3 ] - az, l2 = dx * dx + dz * dz;
+			if ( l2 < 1e-6 ) continue;
+			const t = ( ( x - ax ) * dx + ( z - az ) * dz ) / l2;
+			if ( t < - 0.02 || t > 1.02 ) continue;
+			const d = Math.abs( ( ( x - ax ) * dz - ( z - az ) * dx ) / Math.sqrt( l2 ) );
+			const dd = Math.abs( d - R[ q + 4 ] );
+			if ( dd < 0.14 ) h = Math.max( h, ( R[ q + 5 ] ? 0.022 : 0.05 ) * 0.5 * ( 1 + Math.cos( Math.PI * dd / 0.14 ) ) );
+
+		}
+
+		return h;
+
+	}
+
 	rasterAt( x, z ) {
 
 		const man = this.world.manifest;
@@ -831,7 +1034,8 @@ export class Roads {
 		if ( ! r || ! r[ 0 ].deck ) return null;
 		const v = r[ 0 ].deck[ r[ 1 ] ];
 		if ( v !== v ) return null;
-		return yRef === undefined || yRef > v - 2.5 ? v : null;
+		// a deck counts only for a car near its level: under a viaduct the street below is the ground
+		return yRef === undefined || yRef > v - 1.5 ? v : null;
 
 	}
 
@@ -857,6 +1061,7 @@ export class Roads {
 	animate( dt ) {
 
 		this.t += dt;
+		this.time.value += dt;
 		const m = new THREE.Matrix4();
 		for ( let k = this.falling.length - 1; k >= 0; k -- ) {
 
@@ -893,7 +1098,13 @@ export class Roads {
 		if ( c.group ) {
 
 			this.group.remove( c.group );
-			c.group.traverse( o => { if ( o.isMesh && ! o.isInstancedMesh ) o.geometry.dispose(); if ( o.isInstancedMesh ) o.dispose(); } );
+			c.group.traverse( o => {
+
+				if ( o.userData.water ) { o.material.alphaMap.dispose(); o.material.dispose(); return; }
+				if ( o.isMesh && ! o.isInstancedMesh ) o.geometry.dispose();
+				if ( o.isInstancedMesh ) o.dispose();
+
+			} );
 
 		}
 
