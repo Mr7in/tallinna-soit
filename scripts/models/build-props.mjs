@@ -18,14 +18,6 @@ const PICK = {
 	lamp: { file: 'tall_street_light', node: 'Cylinder', yaw: Math.PI, height: 8.6, ratio: 1, pole: true }, // origin at the pole, arm to +Z
 	shelter: { file: 'city_props_v1', node: 'BusStop', yaw: Math.PI, scale: 0.8, ratio: 0.5, error: 0.01, tex: 1024 },
 	bench: { file: 'city_props_v1', node: 'ParkBenchShort', yaw: Math.PI / 2, scale: 1, ratio: 0.4, error: 0.01 },
-	// traffic light: the game draws its own animated lenses in front of the model's (positions saved in extras.lens)
-	signal: { file: 'traffic_light_eu', node: 'Circle_0', yaw: - Math.PI / 2, height: 3.59, ratio: 1, lenses: /^(red|yellow|green)_light$/ },
-	// parked cars, all from the 1990s; length = real car length (m). Untextured models get their material colours
-	// baked into vertex colours so each car is one draw call.
-	car_golf: { file: 'car_golf3', node: 'RootNode', length: 4.02, drop: /^Interior$/, bake: true, ratio: 0.2, error: 0.01 },
-	car_volvo: { file: 'car_volvo940', node: 'RootNode', length: 4.87, drop: /^Floors$/, bake: true, ratio: 0.2, error: 0.01 },
-	car_corolla: { file: 'car_corolla_ps1', node: 'RootNode', length: 4.1, ratio: 1, tex: 256 },
-	car_e36: { file: 'car_e36', node: 'Object_2', length: 4.43, ratio: 1, tex: 512 },
 	bin: { file: 'lasnamae_trashcan', node: 'model', yaw: 0, height: 0.85, ratio: 0.0025, error: 1, sloppy: true, tex: 512 }, // phone scan: ~1 M triangles
 };
 
@@ -50,53 +42,18 @@ for ( const [ key, P ] of Object.entries( PICK ) ) {
 
 		const m = n.getMesh(); if ( ! m ) return;
 		const w = n.getWorldMatrix();
-		for ( const p of m.listPrimitives() ) { if ( P.drop && P.drop.test( p.getMaterial()?.getName() || '' ) ) continue; const q = p.clone(); const tmp = doc.createMesh().addPrimitive( q ); transformMesh( tmp, w ); tmp.removePrimitive( q ); tmp.dispose(); mesh.addPrimitive( q ); }
+		for ( const p of m.listPrimitives() ) { const q = p.clone(); const tmp = doc.createMesh().addPrimitive( q ); transformMesh( tmp, w ); tmp.removePrimitive( q ); tmp.dispose(); mesh.addPrimitive( q ); }
 
 	} );
 	const node = doc.createNode( key ).setMesh( mesh );
 
+	transformMesh( mesh, rotY( P.yaw ) );
 	let b = getBounds( node );
-	// cars: length along Z
-	transformMesh( mesh, rotY( P.length && b.max[ 0 ] - b.min[ 0 ] > b.max[ 2 ] - b.min[ 2 ] ? Math.PI / 2 : P.yaw || 0 ) );
-	b = getBounds( node );
-	const k = P.length ? P.length / ( b.max[ 2 ] - b.min[ 2 ] ) : P.height ? P.height / ( b.max[ 1 ] - b.min[ 1 ] ) : P.scale;
+	const k = P.height ? P.height / ( b.max[ 1 ] - b.min[ 1 ] ) : P.scale;
 	transformMesh( mesh, scl( k ) );
 	b = getBounds( node );
 	const cz = P.pole ? b.min[ 2 ] + ( b.max[ 0 ] - b.min[ 0 ] ) / 2 : ( b.min[ 2 ] + b.max[ 2 ] ) / 2;
 	transformMesh( mesh, mov( - ( b.min[ 0 ] + b.max[ 0 ] ) / 2, - b.min[ 1 ], - cz ) );
-
-	// lens centres (top to bottom) and their front face, for the game's animated lights
-	let lens = null;
-	if ( P.lenses ) {
-
-		lens = [];
-		for ( const p of mesh.listPrimitives() ) if ( P.lenses.test( p.getMaterial()?.getName() || '' ) ) {
-
-			const a = p.getAttribute( 'POSITION' ), lo = a.getMin( [] ), hi = a.getMax( [] );
-			lens.push( [ +( ( lo[ 1 ] + hi[ 1 ] ) / 2 ).toFixed( 3 ), +hi[ 2 ].toFixed( 3 ), +( ( hi[ 1 ] - lo[ 1 ] ) / 2 ).toFixed( 3 ) ] );
-
-		}
-
-		lens.sort( ( a, b ) => b[ 0 ] - a[ 0 ] );
-
-	}
-
-	if ( P.bake ) {
-
-		const paint = doc.createMaterial( key ).setRoughnessFactor( 0.55 ).setMetallicFactor( 0.1 );
-		for ( const p of mesh.listPrimitives() ) {
-
-			const c = p.getMaterial() ? p.getMaterial().getBaseColorFactor() : [ 0.5, 0.5, 0.5, 1 ];
-			const n = p.getAttribute( 'POSITION' ).getCount(), a = new Float32Array( n * 3 );
-			for ( let i = 0; i < n; i ++ ) a.set( c.slice( 0, 3 ), i * 3 );
-			p.setAttribute( 'COLOR_0', doc.createAccessor().setType( 'VEC3' ).setArray( a ) );
-			// no normals either: the welded mesh simplifies cleanly, and three.js draws it flat shaded (PS1 look)
-			for ( const sem of p.listSemantics() ) if ( /^TEXCOORD|^TANGENT|^NORMAL/.test( sem ) ) p.setAttribute( sem, null );
-			p.setMaterial( paint );
-
-		}
-
-	}
 
 	// keep only this prop, then clean and simplify it in its own document
 	const scene = doc.createScene( key ).addChild( node );
@@ -121,7 +78,6 @@ for ( const [ key, P ] of Object.entries( PICK ) ) {
 		w: +( b2.max[ 0 ] - b2.min[ 0 ] ).toFixed( 2 ), d: +( b2.max[ 2 ] - b2.min[ 2 ] ).toFixed( 2 ),
 		zmin: +b2.min[ 2 ].toFixed( 2 ), zmax: +b2.max[ 2 ].toFixed( 2 ), tris,
 	};
-	if ( lens ) meta[ key ].lens = lens;
 	node.setExtras( meta[ key ] );
 	parts.push( doc );
 

@@ -404,8 +404,8 @@ function models() {
 }
 
 // real models (public/models/props.glb, built by scripts/models/build-props.mjs) replace these procedural types;
-// the rest (cameras, signs, fences) stay procedural. Traffic lights keep their animated lenses, drawn in front of the model's.
-const REAL = { lamp: 1, signal: 2, shelter: 3, bench: 5, bin: 6 };
+// the rest (traffic lights with their animated lenses, cameras, signs, fences) stay procedural
+const REAL = { lamp: 1, shelter: 3, bench: 5, bin: 6 };
 
 async function loadRealModels( url ) {
 
@@ -416,7 +416,7 @@ async function loadRealModels( url ) {
 	const out = {};
 	for ( const node of gltf.scene.children ) {
 
-		const type = REAL[ node.name ] || ( node.name.startsWith( 'car_' ) ? node.name : 0 );
+		const type = REAL[ node.name ];
 		if ( ! type ) continue;
 		const parts = [];
 		node.traverse( o => {
@@ -442,8 +442,7 @@ async function loadRealModels( url ) {
 
 		} );
 		const box = new THREE.Box3().setFromObject( node );
-		const m = { parts, h: node.userData.h || box.max.y, d: box.max.z - box.min.z, shadow: type === 3, lens: node.userData.lens };
-		if ( typeof type === 'string' ) ( out.cars || ( out.cars = [] ) ).push( m ); else out[ type ] = m;
+		out[ type ] = { parts, h: node.userData.h || box.max.y, d: box.max.z - box.min.z, shadow: type === 3 };
 
 	}
 
@@ -827,7 +826,6 @@ export class Roads {
 		}
 
 		this.buildProps( c, d.p || [], g, d.b || [] );
-		this.buildParked( c, d.a || [], g );
 		if ( piers.length ) {
 
 			const n = piers.length / 6, im = new THREE.InstancedMesh( PIER, this.mats.kerb, n ), m = new THREE.Matrix4(), q = new THREE.Quaternion();
@@ -904,14 +902,11 @@ export class Roads {
 			if ( + type === 2 ) {
 
 				c.signals = list;
-				c.lenses = LENS.map( ( [ y ], k ) => {
+				c.lenses = LENS.map( ( [ y ] ) => {
 
 					const lm = new THREE.InstancedMesh( M.lens, M.lensMat, list.length );
-					const L = real && real.lens && real.lens[ k ];
-					lm.userData.y = L ? L[ 0 ] : y;
-					lm.userData.z = L ? L[ 1 ] + 0.01 : 0.235;
-					lm.userData.s = L ? L[ 2 ] / 0.12 : 1;
-					list.forEach( ( p, i ) => lm.setMatrixAt( i, this.lensMatrix( p, lm, m4 ) ) );
+					lm.userData.y = y;
+					list.forEach( ( p, i ) => lm.setMatrixAt( i, this.lensMatrix( p, y, m4 ) ) );
 					lm.computeBoundingSphere();
 					g.add( lm );
 					return lm;
@@ -925,110 +920,6 @@ export class Roads {
 
 	}
 
-	// parked 90s cars in the OSM surface parking lots: rows of 2.5 x 5 m stalls along the lot's longest side,
-	// back-to-back pairs of rows with a 6 m aisle between, a bit more than half of the stalls taken
-	buildParked( c, A, g ) {
-
-		const cars = this.real.cars, W = this.world;
-		if ( ! cars || ! cars.length ) return;
-		const per = cars.map( () => [] ), MAX = this.radius > 1 ? 160 : 70;
-		let total = 0;
-		const hash = ( a, b ) => { const s = Math.sin( a * 12.9898 + b * 78.233 ) * 43758.5453; return s - Math.floor( s ); };
-		const inside = ( P, x, z ) => {
-
-			let o = false;
-			for ( let i = 0, j = P.length - 2; i < P.length; j = i, i += 2 ) {
-
-				const xi = P[ i ], zi = P[ i + 1 ], xj = P[ j ], zj = P[ j + 1 ];
-				if ( ( zi > z ) !== ( zj > z ) && x < ( xj - xi ) * ( z - zi ) / ( zj - zi ) + xi ) o = ! o;
-
-			}
-
-			return o;
-
-		};
-
-		for ( const [ type, P ] of A ) {
-
-			if ( type !== 0 || P.length < 6 ) continue;
-			// orientation of the longest edge
-			let best = 0, ux = 1, uz = 0;
-			for ( let i = 0, j = P.length - 2; i < P.length; j = i, i += 2 ) {
-
-				const dx = P[ i ] - P[ j ], dz = P[ i + 1 ] - P[ j + 1 ], l = Math.hypot( dx, dz );
-				if ( l > best ) { best = l; ux = dx / l; uz = dz / l; }
-
-			}
-
-			const vx = - uz, vz = ux;
-			let u0 = Infinity, u1 = - Infinity, v0 = Infinity, v1 = - Infinity;
-			for ( let i = 0; i < P.length; i += 2 ) {
-
-				const u = P[ i ] * ux + P[ i + 1 ] * uz, v = P[ i ] * vx + P[ i + 1 ] * vz;
-				u0 = Math.min( u0, u ); u1 = Math.max( u1, u ); v0 = Math.min( v0, v ); v1 = Math.max( v1, v );
-
-			}
-
-			if ( ( u1 - u0 ) * ( v1 - v0 ) > 60000 ) continue; // huge lots are usually mapped loosely
-			const yaw0 = Math.atan2( vx, vz );
-			for ( let base = v0 + 0.4; base + 5 < v1; base += 16 ) for ( const off of [ 2.5, 7.5 ] ) {
-
-				const v = base + off;
-				if ( v + 2.5 > v1 ) break;
-				for ( let u = u0 + 1.55; u + 1.25 < u1; u += 2.5 ) {
-
-					const x = u * ux + v * vx, z = u * uz + v * vz;
-					const h = hash( x, z );
-					if ( h > 0.58 || total >= MAX ) continue;
-					let ok = true;
-					for ( const [ a, b ] of [ [ - 1.1, - 2.4 ], [ 1.1, - 2.4 ], [ - 1.1, 2.4 ], [ 1.1, 2.4 ], [ 0, 0 ] ] ) {
-
-						if ( ! inside( P, x + a * ux + b * vx, z + a * uz + b * vz ) ) { ok = false; break; }
-
-					}
-
-					if ( ! ok || W.treesNear( x, z, 2.4 ).length ) continue;
-					const k = Math.floor( hash( z, x ) * cars.length ) % cars.length;
-					// rows face the aisle: alternate rows point opposite ways, some drivers reversed in
-					const yaw = yaw0 + ( off < 5 ? Math.PI : 0 ) + ( hash( x + 1, z ) < 0.2 ? Math.PI : 0 ) + ( hash( x, z + 1 ) - 0.5 ) * 0.12;
-					per[ k ].push( { x: x + ( hash( x + 2, z ) - 0.5 ) * 0.3 * ux, z: z + ( hash( x + 2, z ) - 0.5 ) * 0.3 * uz, yaw } );
-					total ++;
-
-				}
-
-			}
-
-		}
-
-		if ( ! total ) return;
-		const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3();
-		per.forEach( ( list, k ) => {
-
-			if ( ! list.length ) return;
-			const car = cars[ k ];
-			const ims = car.parts.map( ( { g: geo, mat } ) => {
-
-				const im = new THREE.InstancedMesh( geo, mat, list.length );
-				im.userData.sh = 1; im.castShadow = this.radius > 1; im.receiveShadow = true; // tablets: no car shadows
-				return im;
-
-			} );
-			list.forEach( ( p, i ) => {
-
-				const y = W.height( p.x, p.z );
-				m.compose( pos.set( p.x, y, p.z ), q.setFromAxisAngle( Y, p.yaw ), ONE );
-				for ( const im of ims ) im.setMatrixAt( i, m );
-				// two solid circles along the body for the collisions (they never fall)
-				const fx = Math.sin( p.yaw ), fz = Math.cos( p.yaw ), o = car.d * 0.27;
-				for ( const s of [ - 1, 1 ] ) c.props.push( { type: 0, solid: true, x: p.x + fx * o * s, z: p.z + fz * o * s, y, h: 1.5, r: 0.95, fallen: false, fell() {} } );
-
-			} );
-			for ( const im of ims ) { im.computeBoundingSphere(); g.add( im ); }
-
-		} );
-
-	}
-
 	matrix( p, m ) {
 
 		const q = new THREE.Quaternion().setFromAxisAngle( Y, p.yaw );
@@ -1037,10 +928,9 @@ export class Roads {
 
 	}
 
-	lensMatrix( p, l, m ) {
+	lensMatrix( p, y, m ) {
 
-		const u = l.userData;
-		return this.matrix( p, m ).multiply( new THREE.Matrix4().makeTranslation( 0, u.y, u.z ).scale( SC.set( u.s, u.s, 1 ) ) );
+		return this.matrix( p, m ).multiply( new THREE.Matrix4().makeTranslation( 0, y, 0.235 ) );
 
 	}
 
@@ -1245,7 +1135,7 @@ export class Roads {
 			if ( p.type === 2 ) {
 
 				const c = p.chunk;
-				if ( c && c.lenses ) for ( const l of c.lenses ) { l.setMatrixAt( p.slot, this.lensMatrix( p, l, m ) ); l.instanceMatrix.needsUpdate = true; }
+				if ( c && c.lenses ) for ( const l of c.lenses ) { l.setMatrixAt( p.slot, this.lensMatrix( p, l.userData.y, m ) ); l.instanceMatrix.needsUpdate = true; }
 
 			}
 
