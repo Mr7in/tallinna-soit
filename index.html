@@ -3,48 +3,49 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Tallinna Sõit</title>
+<title>TLN 4:47</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Michroma&family=VT323&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:rgba(12,13,15,.78); --bg2:rgba(24,26,30,.86); --line:rgba(255,255,255,.12); --txt:#eceef1; --dim:#8d939c; --acc:#e63b2e; --acc2:#ffb400; }
+  :root { --bg:rgba(20,26,51,.8); --bg2:rgba(30,42,82,.86); --line:rgba(232,160,168,.2); --txt:#f3e9dc; --dim:#b7a8c9; --acc:#e0442e; --acc2:#f4c27a; }
   * { box-sizing:border-box; }
-  html,body { margin:0; height:100%; overflow:hidden; background:#0b0c0e; font-family:'Barlow', system-ui, sans-serif; color:var(--txt); touch-action:none; user-select:none; -webkit-user-select:none; }
+  html,body { margin:0; height:100%; overflow:hidden; background:#141a33; font-family:'Barlow', system-ui, sans-serif; color:var(--txt); touch-action:none; user-select:none; -webkit-user-select:none; }
+  body::after { content:''; position:fixed; inset:0; z-index:40; pointer-events:none; background:repeating-linear-gradient(0deg,rgba(0,0,0,.12) 0,rgba(0,0,0,.12) 1px,transparent 1px,transparent 3px); }
   canvas#c { position:fixed; inset:0; width:100%; height:100%; display:block; }
-  .cond { font-family:'Barlow Condensed', 'Barlow', sans-serif; text-transform:uppercase; letter-spacing:.06em; }
+  .cond { font-family:'VT323', monospace; text-transform:uppercase; letter-spacing:.06em; }
 
   /* ---------- main menu ---------- */
   #menu { position:fixed; inset:0; z-index:20; display:grid; grid-template-columns:1fr minmax(300px,400px); grid-template-rows:auto 1fr auto; pointer-events:none; }
   #menu > * { pointer-events:auto; }
   #brand { grid-column:1/3; display:flex; align-items:center; gap:18px; padding:22px 32px; background:linear-gradient(180deg,rgba(0,0,0,.65),rgba(0,0,0,0)); }
-  #brand h1 { margin:0; font:700 34px/1 'Barlow Condensed',sans-serif; letter-spacing:.14em; text-transform:uppercase; }
+  #brand h1 { margin:0; font:400 34px/1.1 'Michroma',sans-serif; letter-spacing:-.01em; transform:skewX(-10deg); background:linear-gradient(180deg,#fff 0%,#dce3f2 38%,#6e7fa8 50%,#f3e9dc 56%,#e8a0a8 82%,#f4c27a 100%); -webkit-background-clip:text; background-clip:text; color:transparent; filter:drop-shadow(3px 3px 0 #0b0c10); }
   #brand h1 span { color:var(--acc); }
-  #brand .ver { font:500 13px 'Barlow Condensed',sans-serif; letter-spacing:.2em; color:var(--dim); border:1px solid var(--line); padding:3px 8px; }
+  #brand .ver { font:400 17px 'VT323',sans-serif; letter-spacing:.2em; color:var(--dim); border:1px solid var(--line); padding:3px 8px; }
   #carinfo { grid-column:1; grid-row:3; align-self:end; padding:0 32px 30px; max-width:560px; }
-  #carinfo .tag { font:600 13px 'Barlow Condensed',sans-serif; letter-spacing:.25em; color:var(--acc); }
-  #carinfo h2 { margin:4px 0 14px; font:700 clamp(40px,6vw,72px)/.9 'Barlow Condensed',sans-serif; text-transform:uppercase; letter-spacing:.02em; text-shadow:0 2px 24px rgba(0,0,0,.6); }
+  #carinfo .tag { font:400 17px 'VT323',sans-serif; letter-spacing:.25em; color:var(--acc); }
+  #carinfo h2 { margin:6px 0 16px; font:400 clamp(22px,2.8vw,38px)/1.1 'Michroma',sans-serif; text-transform:uppercase; letter-spacing:-.01em; transform:skewX(-8deg); transform-origin:left bottom; text-shadow:4px 4px 0 #0b0c10; }
   .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--line); border:1px solid var(--line); }
   .stats div { background:var(--bg); padding:10px 12px; }
-  .stats b { display:block; font:600 22px 'Barlow Condensed',sans-serif; }
-  .stats small { font:500 11px 'Barlow Condensed',sans-serif; letter-spacing:.18em; color:var(--dim); text-transform:uppercase; }
+  .stats b { display:block; font:400 29px 'VT323',sans-serif; }
+  .stats small { font:400 14px 'VT323',sans-serif; letter-spacing:.18em; color:var(--dim); text-transform:uppercase; }
   #side { grid-column:2; grid-row:2/4; background:var(--bg); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-left:1px solid var(--line); display:flex; flex-direction:column; overflow:auto; }
   .sec { padding:18px 22px; border-bottom:1px solid var(--line); }
-  .sec h3 { margin:0 0 10px; font:600 12px 'Barlow Condensed',sans-serif; letter-spacing:.28em; color:var(--dim); text-transform:uppercase; }
+  .sec h3 { margin:0 0 10px; font:400 16px 'VT323',sans-serif; letter-spacing:.28em; color:var(--dim); text-transform:uppercase; }
   .cars { display:flex; flex-direction:column; gap:6px; }
   .carbtn { all:unset; cursor:pointer; display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border:1px solid var(--line); background:var(--bg2); transition:background .15s, border-color .15s; }
-  .carbtn b { font:600 19px 'Barlow Condensed',sans-serif; letter-spacing:.06em; text-transform:uppercase; }
-  .carbtn small { font:500 12px 'Barlow Condensed',sans-serif; letter-spacing:.16em; color:var(--dim); }
+  .carbtn b { font:400 25px 'VT323',sans-serif; letter-spacing:.06em; text-transform:uppercase; }
+  .carbtn small { font:400 16px 'VT323',sans-serif; letter-spacing:.16em; color:var(--dim); }
   .carbtn[aria-pressed=true] { border-color:var(--acc); background:linear-gradient(90deg,rgba(230,59,46,.28),rgba(230,59,46,.05)); }
   .opt { display:grid; grid-template-columns:1fr auto; align-items:center; gap:10px; padding:9px 2px; border-bottom:1px solid rgba(255,255,255,.05); cursor:pointer; }
   .opt:last-child { border-bottom:0; }
   .opt > span { font:500 15px 'Barlow',sans-serif; color:#c9cdd3; }
-  .opt .val { display:flex; align-items:center; gap:4px; font:600 16px 'Barlow Condensed',sans-serif; letter-spacing:.08em; text-transform:uppercase; }
+  .opt .val { display:flex; align-items:center; gap:4px; font:400 21px 'VT323',sans-serif; letter-spacing:.08em; text-transform:uppercase; }
   .opt .val i { font-style:normal; color:var(--dim); width:22px; text-align:center; font-size:18px; cursor:pointer; }
   .opt .val em { font-style:normal; min-width:118px; text-align:center; }
-  .go { all:unset; cursor:pointer; margin:18px 22px 22px; padding:16px; text-align:center; background:var(--acc); color:#fff; font:700 24px 'Barlow Condensed',sans-serif; letter-spacing:.3em; text-transform:uppercase; transition:filter .15s; }
+  .go { all:unset; cursor:pointer; margin:18px 22px 22px; padding:16px; text-align:center; background:var(--acc); color:#fff; font:400 31px 'VT323',sans-serif; letter-spacing:.3em; text-transform:uppercase; transition:filter .15s; }
   .go:hover { filter:brightness(1.12); }
   .hint { font:500 12px/1.6 'Barlow',sans-serif; color:var(--dim); padding:14px 22px; }
-  .hint kbd { font:600 11px 'Barlow Condensed',sans-serif; border:1px solid var(--line); padding:0 5px; color:#c9cdd3; letter-spacing:.05em; }
+  .hint kbd { font:400 14px 'VT323',sans-serif; border:1px solid var(--line); padding:0 5px; color:#c9cdd3; letter-spacing:.05em; }
   .nav.focus, .nav:focus-visible { outline:2px solid var(--acc2); outline-offset:-2px; }
   .opt.focus { background:rgba(255,180,0,.08); outline:none; box-shadow:inset 3px 0 0 var(--acc2); }
 
@@ -52,26 +53,26 @@
   #pause { position:fixed; inset:0; z-index:15; display:none; place-items:center; background:rgba(5,6,8,.55); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
   #pause .box { width:min(460px,94vw); max-height:92vh; overflow:auto; background:var(--bg); border:1px solid var(--line); }
   #pause .head { padding:16px 22px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--line); }
-  #pause .head b { font:700 26px 'Barlow Condensed',sans-serif; letter-spacing:.2em; text-transform:uppercase; }
-  #pause .head small { font:500 12px 'Barlow Condensed',sans-serif; letter-spacing:.2em; color:var(--dim); }
+  #pause .head b { font:400 34px 'VT323',sans-serif; letter-spacing:.2em; text-transform:uppercase; }
+  #pause .head small { font:400 16px 'VT323',sans-serif; letter-spacing:.2em; color:var(--dim); }
   .acts { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line); border-top:1px solid var(--line); }
-  .act { all:unset; cursor:pointer; padding:14px; text-align:center; background:var(--bg2); font:600 16px 'Barlow Condensed',sans-serif; letter-spacing:.18em; text-transform:uppercase; }
+  .act { all:unset; cursor:pointer; padding:14px; text-align:center; background:var(--bg2); font:400 21px 'VT323',sans-serif; letter-spacing:.18em; text-transform:uppercase; }
   .act.primary { background:var(--acc); grid-column:1/3; font-size:20px; }
 
   /* ---------- HUD ---------- */
   #hud { position:fixed; inset:0; pointer-events:none; z-index:5; display:none; }
-  #pbtn { pointer-events:auto; position:absolute; left:14px; top:14px; width:44px; height:44px; display:grid; place-items:center; background:var(--bg); border:1px solid var(--line); color:var(--txt); font:600 20px 'Barlow Condensed',sans-serif; cursor:pointer; }
-  #info { position:absolute; left:68px; top:14px; height:44px; display:flex; align-items:center; gap:14px; padding:0 14px; background:var(--bg); border:1px solid var(--line); font:600 14px 'Barlow Condensed',sans-serif; letter-spacing:.16em; text-transform:uppercase; }
+  #pbtn { pointer-events:auto; position:absolute; left:14px; top:14px; width:44px; height:44px; display:grid; place-items:center; background:var(--bg); border:1px solid var(--line); color:var(--txt); font:400 26px 'VT323',sans-serif; cursor:pointer; }
+  #info { position:absolute; left:68px; top:14px; height:44px; display:flex; align-items:center; gap:14px; padding:0 14px; background:var(--bg); border:1px solid var(--line); font:400 18px 'VT323',sans-serif; letter-spacing:.16em; text-transform:uppercase; }
   #info .sep { width:1px; height:18px; background:var(--line); }
   #info .m { color:var(--acc2); }
-  #status { position:absolute; left:50%; top:42%; transform:translate(-50%,-50%); background:var(--bg); border:1px solid var(--line); border-left:3px solid var(--acc); padding:14px 24px; font:600 24px 'Barlow Condensed',sans-serif; letter-spacing:.14em; text-transform:uppercase; text-align:left; max-width:90vw; }
+  #status { position:absolute; left:50%; top:42%; transform:translate(-50%,-50%); background:var(--bg); border:1px solid var(--line); border-left:3px solid var(--acc); padding:14px 24px; font:400 31px 'VT323',sans-serif; letter-spacing:.14em; text-transform:uppercase; text-align:left; max-width:90vw; }
   #status small { display:block; font:500 13px 'Barlow',sans-serif; letter-spacing:.02em; text-transform:none; color:var(--dim); margin-top:2px; }
-  #toast { position:absolute; left:50%; top:76px; transform:translateX(-50%); background:var(--bg); border:1px solid var(--line); padding:8px 18px; font:600 16px 'Barlow Condensed',sans-serif; letter-spacing:.16em; text-transform:uppercase; opacity:0; transition:opacity .25s; }
+  #toast { position:absolute; left:50%; top:76px; transform:translateX(-50%); background:var(--bg); border:1px solid var(--line); padding:8px 18px; font:400 21px 'VT323',sans-serif; letter-spacing:.16em; text-transform:uppercase; opacity:0; transition:opacity .25s; }
   #tacho { position:absolute; right:12px; bottom:10px; width:250px; height:250px; }
-  #mapframe { position:absolute; left:14px; bottom:14px; width:200px; height:200px; border:1px solid rgba(255,255,255,.25); border-radius:6px; overflow:hidden; box-shadow:0 0 0 3px rgba(12,13,15,.6); pointer-events:auto; cursor:pointer; background:#5d6a52; }
+  #mapframe { position:absolute; left:14px; bottom:14px; width:200px; height:200px; border:1px solid rgba(255,255,255,.25); border-radius:6px; overflow:hidden; box-shadow:0 0 0 3px rgba(20,26,51,.6); pointer-events:auto; cursor:pointer; background:#5d6a52; }
   #mapframe canvas { width:100%; height:100%; display:block; }
-  #mapframe .key { position:absolute; right:5px; top:5px; font:600 11px 'Barlow Condensed',sans-serif; letter-spacing:.1em; background:rgba(12,13,15,.7); border:1px solid var(--line); padding:1px 5px; color:#c9cdd3; }
-  #fps { position:absolute; right:8px; top:6px; font:600 12px 'Barlow Condensed',sans-serif; letter-spacing:.08em; color:#cfd3d8; background:rgba(12,13,15,.55); padding:1px 6px; border-radius:3px; min-width:46px; text-align:right; }
+  #mapframe .key { position:absolute; right:5px; top:5px; font:400 14px 'VT323',sans-serif; letter-spacing:.1em; background:rgba(20,26,51,.7); border:1px solid var(--line); padding:1px 5px; color:#c9cdd3; }
+  #fps { position:absolute; right:8px; top:6px; font:400 16px 'VT323',sans-serif; letter-spacing:.08em; color:#cfd3d8; background:rgba(20,26,51,.55); padding:1px 6px; border-radius:3px; min-width:46px; text-align:right; }
   #fps.low { color:#ff8a7a; }
 
   /* ---------- big map ---------- */
@@ -79,16 +80,16 @@
   #bigmap canvas { position:absolute; inset:0; width:100%; height:100%; touch-action:none; cursor:crosshair; }
   #bigmap .bar { position:absolute; left:14px; top:14px; right:14px; display:flex; gap:8px; align-items:center; pointer-events:none; }
   #bigmap .bar > * { pointer-events:auto; }
-  #bigmap .title { background:var(--bg); border:1px solid var(--line); padding:8px 14px; font:700 18px 'Barlow Condensed',sans-serif; letter-spacing:.2em; text-transform:uppercase; }
+  #bigmap .title { background:var(--bg); border:1px solid var(--line); padding:8px 14px; font:400 23px 'VT323',sans-serif; letter-spacing:.2em; text-transform:uppercase; }
   #bigmap .title small { font:500 13px 'Barlow',sans-serif; letter-spacing:0; text-transform:none; color:var(--dim); margin-left:10px; }
   #bigmap .sp { flex:1; }
-  #bigmap button { all:unset; cursor:pointer; width:44px; height:44px; display:grid; place-items:center; background:var(--bg); border:1px solid var(--line); font:600 22px 'Barlow Condensed',sans-serif; color:var(--txt); }
+  #bigmap button { all:unset; cursor:pointer; width:44px; height:44px; display:grid; place-items:center; background:var(--bg); border:1px solid var(--line); font:400 29px 'VT323',sans-serif; color:var(--txt); }
   #bigmap .wide { width:auto; padding:0 14px; font-size:15px; letter-spacing:.14em; text-transform:uppercase; }
   #bigmap .tip { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); background:var(--bg); border:1px solid var(--line); padding:8px 16px; font:500 13px 'Barlow',sans-serif; color:#c9cdd3; white-space:nowrap; }
   #attr { position:absolute; left:50%; bottom:3px; transform:translateX(-50%); font:11px 'Barlow',sans-serif; color:rgba(255,255,255,.75); text-shadow:0 1px 2px #000; white-space:nowrap; }
 
   #touch { position:fixed; inset:auto 0 0 0; height:220px; z-index:6; display:none; pointer-events:none; }
-  #touch .pad { pointer-events:auto; position:absolute; bottom:22px; width:80px; height:80px; border-radius:50%; border:1px solid rgba(255,255,255,.3); background:rgba(12,13,15,.55); font:600 24px 'Barlow Condensed',sans-serif; color:#fff; display:grid; place-items:center; }
+  #touch .pad { pointer-events:auto; position:absolute; bottom:22px; width:80px; height:80px; border-radius:50%; border:1px solid rgba(255,255,255,.3); background:rgba(20,26,51,.55); font:400 31px 'VT323',sans-serif; color:#fff; display:grid; place-items:center; }
   #touch .pad.on { background:rgba(230,59,46,.75); }
   body.touch #mapframe { width:124px; height:124px; left:auto; right:14px; bottom:auto; top:30px; }
   body.touch #mapframe .key { display:none; }
@@ -109,7 +110,7 @@
 <canvas id="c"></canvas>
 
 <div id="menu">
-  <header id="brand"><h1>Tallinna <span>Sõit</span></h1><div class="ver">V10</div></header>
+  <header id="brand"><h1>TLN 4:47</h1><div class="ver">VALGE ÖÖ · V11</div></header>
   <div id="carinfo">
     <div class="tag" id="ci-tag">4WD · TURBO</div>
     <h2 id="ci-name">Rally 4WD</h2>
@@ -145,7 +146,7 @@
 
 <div id="hud">
   <button id="pbtn" aria-label="Paus">II</button>
-  <div id="info"><span id="i-car">Rally 4WD</span><span class="sep"></span><span class="m" id="i-mode">Rally</span><span class="sep"></span><span id="i-place">Kristiine</span></div>
+  <div id="info"><span id="i-car">Rally 4WD</span><span class="sep"></span><span class="m" id="i-mode">Rally</span><span class="sep"></span><span id="i-place">Kristiine</span><span class="sep"></span><span class="m">04:47</span></div>
   <div id="status">Laen linna<small>Maa-ameti 3D-majad ja ortofoto</small></div>
   <div id="toast"></div>
   <div id="mapframe"><canvas id="mini"></canvas><span class="key">M</span></div>

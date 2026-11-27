@@ -258,7 +258,7 @@ export function buildCar( id = 'rally', colorIndex = 0 ) {
 		black: new THREE.MeshStandardMaterial( { color: 0x0c0d0f, roughness: 0.9, side: THREE.DoubleSide } ),
 		trim: new THREE.MeshStandardMaterial( { color: 0x1d1f23, roughness: 0.6, ...flat } ),
 		chrome: new THREE.MeshStandardMaterial( { color: 0xd6dade, metalness: 1, roughness: 0.18 } ),
-		lamp: new THREE.MeshStandardMaterial( { color: 0xeef3ff, emissive: 0xcfe0ff, emissiveIntensity: 0.6, roughness: 0.1, metalness: 0.2 } ),
+		lamp: new THREE.MeshStandardMaterial( { color: 0xfff4dc, emissive: 0xffd28a, emissiveIntensity: 2.2, roughness: 0.1, metalness: 0.2 } ), // halogens on: it is 4:47
 		tail: new THREE.MeshStandardMaterial( { color: 0x8a0d12, emissive: 0xff2020, emissiveIntensity: 0.45, roughness: 0.2 } ),
 		amber: new THREE.MeshStandardMaterial( { color: 0xff9a1a, emissive: 0xff8000, emissiveIntensity: 0.3, roughness: 0.2 } ),
 		rim: new THREE.MeshStandardMaterial( { color: D.rim, metalness: 0.75, roughness: 0.3, ...flat } ),

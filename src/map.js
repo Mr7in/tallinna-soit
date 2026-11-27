@@ -113,7 +113,7 @@ export class TileMap {
 		}
 
 		// places
-		ctx.font = '600 13px "Barlow Condensed", sans-serif';
+		ctx.font = '400 17px "VT323", monospace';
 		ctx.textAlign = 'center';
 		for ( const p of this.places ) {
 
