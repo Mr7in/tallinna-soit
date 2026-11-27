@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { ORIGIN_E, ORIGIN_N } from './world.js';
 
 const PIER = new THREE.BoxGeometry( 1, 1, 1 );
@@ -401,6 +403,53 @@ function models() {
 
 }
 
+// real models (public/models/props.glb, built by scripts/models/build-props.mjs) replace these procedural types;
+// the rest (traffic lights with their animated lenses, cameras, signs, fences) stay procedural
+const REAL = { lamp: 1, shelter: 3, bench: 5, bin: 6 };
+
+async function loadRealModels( url ) {
+
+	const loader = new GLTFLoader();
+	loader.setMeshoptDecoder( MeshoptDecoder );
+	const gltf = await loader.loadAsync( url );
+	gltf.scene.updateMatrixWorld( true );
+	const out = {};
+	for ( const node of gltf.scene.children ) {
+
+		const type = REAL[ node.name ];
+		if ( ! type ) continue;
+		const parts = [];
+		node.traverse( o => {
+
+			if ( ! o.isMesh ) return;
+			// the compressed mesh keeps its dequantization in the node transform: bake it into float geometry,
+			// because instance matrices replace the node transform
+			const g = o.geometry.clone();
+			for ( const k of [ 'position', 'normal', 'tangent' ] ) {
+
+				const a = g.getAttribute( k ); if ( ! a ) continue;
+				const n = a.itemSize, f = new Float32Array( a.count * n );
+				for ( let i = 0; i < a.count; i ++ ) { f[ i * n ] = a.getX( i ); f[ i * n + 1 ] = a.getY( i ); f[ i * n + 2 ] = a.getZ( i ); if ( n === 4 ) f[ i * n + 3 ] = a.getW( i ); }
+				g.setAttribute( k, new THREE.BufferAttribute( f, n ) );
+
+			}
+
+			g.applyMatrix4( o.matrixWorld ); // every prop stands at the origin of the file
+			g.computeBoundingSphere();
+			const mat = o.material;
+			if ( mat.map ) mat.map.anisotropy = 4;
+			parts.push( { g, mat } );
+
+		} );
+		const box = new THREE.Box3().setFromObject( node );
+		out[ type ] = { parts, h: node.userData.h || box.max.y, d: box.max.z - box.min.z, shadow: type === 3 };
+
+	}
+
+	return out;
+
+}
+
 const LENS = [ [ 3.33, 0xff2a1a ], [ 3.0, 0xffb000 ], [ 2.67, 0x29e05a ] ];
 export const SEA_LEVEL = 0.0;
 const WATER_GEO = new THREE.PlaneGeometry( 250, 250, 1, 1 ).rotateX( - Math.PI / 2 );
@@ -457,11 +506,15 @@ export class Roads {
 		this.mats.rail = new THREE.MeshLambertMaterial( { color: 0xc4c8cc, emissive: 0x2a2c2e, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: - 1, polygonOffsetUnits: - 8 } );
 		this.mats.sleeper = new THREE.MeshLambertMaterial( { color: 0x5b4b3d, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: - 0.5, polygonOffsetUnits: - 4 } );
 		this.time = { value: 0 };
+		// street furniture models: chunks wait for them (a fraction of a second), and fall back to the procedural ones
+		this.real = null;
+		loadRealModels( './models/props.glb' ).then( r => { this.real = r; } ).catch( e => { console.warn( 'prop models', e ); this.real = {}; } );
 
 	}
 
 	update( x, z ) {
 
+		if ( ! this.real ) return;
 		const man = this.world.manifest;
 		if ( ! man || ! man.osmChunks ) return;
 		const has = this.has || ( this.has = new Set( man.osmChunks.map( c => c[ 0 ] + '_' + c[ 1 ] ) ) );
@@ -809,8 +862,9 @@ export class Roads {
 			if ( ! M[ type ] ) continue;
 			let x = P[ k + 1 ], z = P[ k + 2 ];
 			const yaw = P[ k + 3 ];
-			if ( type === 3 ) { x -= Math.sin( yaw ) * 1.4; z -= Math.cos( yaw ) * 1.4; } // shelter sits back from the kerb
-			( byType[ type ] || ( byType[ type ] = [] ) ).push( { type, x, z, y: W.height( x, z ), yaw, h: M[ type ][ 1 ], r: M[ type ][ 2 ], fallen: false } );
+			if ( type === 3 ) { const b = this.real[ 3 ] ? this.real[ 3 ].d / 2 + 0.3 : 1.4; x -= Math.sin( yaw ) * b; z -= Math.cos( yaw ) * b; } // shelter sits back from the kerb
+			const h = this.real[ type ] ? this.real[ type ].h : M[ type ][ 1 ];
+			( byType[ type ] || ( byType[ type ] = [] ) ).push( { type, x, z, y: W.height( x, z ), yaw, h, r: M[ type ][ 2 ], fallen: false } );
 
 		}
 
@@ -824,19 +878,27 @@ export class Roads {
 		const m4 = new THREE.Matrix4();
 		for ( const type in byType ) {
 
-			const list = byType[ type ];
-			const im = new THREE.InstancedMesh( M[ type ][ 0 ], M.mat, list.length );
-			im.userData.sh = 1; // street furniture: no shadow casting (cheap shadow pass)
+			const list = byType[ type ], real = this.real[ type ];
+			const ims = ( real ? real.parts : [ { g: M[ type ][ 0 ], mat: M.mat } ] ).map( ( { g: geo, mat } ) => {
+
+				const im = new THREE.InstancedMesh( geo, mat, list.length );
+				// street furniture casts no shadow (cheap shadow pass), apart from the bus shelter roofs
+				im.userData.sh = 1;
+				im.receiveShadow = !! real;
+				im.castShadow = !! ( real && real.shadow );
+				return im;
+
+			} );
 			list.forEach( ( p, i ) => {
 
-				p.mesh = im; p.slot = i; p.chunk = c;
+				p.meshes = ims; p.mesh = ims[ 0 ]; p.slot = i; p.chunk = c;
 				p.fell = ( dx, dz ) => this.fell( p, dx, dz );
-				im.setMatrixAt( i, this.matrix( p, m4 ) );
+				this.matrix( p, m4 );
+				for ( const im of ims ) im.setMatrixAt( i, m4 );
 				c.props.push( p );
 
 			} );
-			im.computeBoundingSphere();
-			g.add( im );
+			for ( const im of ims ) { im.computeBoundingSphere(); g.add( im ); }
 			if ( + type === 2 ) {
 
 				c.signals = list;
@@ -1068,8 +1130,8 @@ export class Roads {
 			const p = this.falling[ k ], f = p.fall;
 			f.v += ( 2 + Math.sin( f.angle ) * 12 ) * dt;
 			f.angle = Math.min( Math.PI / 2 - 0.04, f.angle + f.v * dt );
-			p.mesh.setMatrixAt( p.slot, this.matrix( p, m ) );
-			p.mesh.instanceMatrix.needsUpdate = true;
+			this.matrix( p, m );
+			for ( const im of p.meshes ) { im.setMatrixAt( p.slot, m ); im.instanceMatrix.needsUpdate = true; }
 			if ( p.type === 2 ) {
 
 				const c = p.chunk;
