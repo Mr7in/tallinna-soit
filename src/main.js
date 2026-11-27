@@ -292,7 +292,7 @@ const CAMS = [
 
 // ---------- options (shared by the main menu and the pause menu) ----------
 const OPTS = {
-	mode: { label: 'Sõidurežiim', values: [ 'arcade', 'sim' ], names: [ 'Arcade', 'Simulatsioon' ], get: () => S.mode, set: v => { S.mode = v; vehicle.mode = v; store.set( 'mode', v ); } },
+	mode: { label: 'Sõidurežiim', values: [ 'arcade', 'sim' ], names: [ 'Rally', 'Simulatsioon' ], get: () => S.mode, set: v => { S.mode = v; vehicle.mode = v; store.set( 'mode', v ); } },
 	auto: { label: 'Käigukast', values: [ true, false ], names: [ 'Automaat', 'Manuaal' ], get: () => S.auto, set: v => { S.auto = v; vehicle.setAuto( v ); store.set( 'auto', v ); } },
 	car: { label: 'Auto', values: CAR_SPECS.map( c => c.id ), names: CAR_SPECS.map( c => c.name ), get: () => S.car, set: v => selectCar( v ) },
 	color: { label: 'Värv', values: [ 0, 1, 2, 3, 4 ], names: [ 'Tehase', 'Värv 2', 'Värv 3', 'Värv 4', 'Värv 5' ], get: () => S.colors[ S.car ] || 0, set: v => { S.colors[ S.car ] = v; store.set( 'colors', S.colors ); car && car.setColor( v ); showCar && showCar.setColor( v ); } },
@@ -363,7 +363,7 @@ function refreshUI() {
 	$( 'ci-rpm' ).textContent = sp.redline;
 	$( 'ci-drive' ).textContent = DRIVE[ sp.drive ];
 	$( 'i-car' ).textContent = sp.name;
-	$( 'i-mode' ).textContent = S.mode === 'arcade' ? 'Arcade' : 'Sim';
+	$( 'i-mode' ).textContent = S.mode === 'arcade' ? 'Rally' : 'Sim';
 	$( 'i-place' ).textContent = PLACES[ S.place ].name;
 	if ( inMenu && ( ! showCar || showCar.id !== S.car ) ) makeShowCar();
 	else if ( showCar ) showCar.setColor( S.colors[ S.car ] || 0 );
@@ -476,7 +476,7 @@ addEventListener( 'keydown', e => {
 	if ( e.code === 'KeyC' ) cycleCam();
 	if ( e.code === 'KeyR' ) resetCar();
 	if ( e.code === 'KeyH' ) audio.horn();
-	if ( e.code === 'KeyT' ) { cycle( 'mode', 1 ); toast( S.mode === 'arcade' ? 'Arcade' : 'Simulatsioon' ); }
+	if ( e.code === 'KeyT' ) { cycle( 'mode', 1 ); toast( S.mode === 'arcade' ? 'Rally' : 'Simulatsioon' ); }
 	if ( e.code === 'KeyM' ) openMap();
 
 } );
