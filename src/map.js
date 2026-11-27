@@ -7,28 +7,34 @@ const GRID_E = 40500, GRID_N = 5993000, RES0 = 4000; // L-EST tile grid: origin 
 const MAXZ = 14;
 
 const cache = new Map();
+let gen = 0; // bumps whenever a tile becomes drawable, so cached maps know to redraw
+export const tileGen = () => gen;
 function tile( layer, z, x, y ) {
 
 	const key = layer + z + '/' + x + '/' + y;
+	const now = performance.now();
 	let t = cache.get( key );
 	if ( ! t ) {
 
-		t = { img: new Image(), ok: false, used: 0 };
-		t.img.crossOrigin = 'anonymous';
-		t.img.onload = () => { t.ok = true; };
-		t.img.src = TMS + layer + '/' + z + '/' + x + '/' + y + ( layer === 'foto' ? '.jpg' : '.png' );
-		cache.set( key, t );
-		if ( cache.size > 900 ) {
+		if ( cache.size >= 420 ) {
 
-			// drop the least recently used quarter
-			const list = [ ...cache.entries() ].sort( ( a, b ) => a[ 1 ].used - b[ 1 ].used ).slice( 0, 220 );
-			for ( const [ k, v ] of list ) { v.img.src = ''; cache.delete( k ); }
+			// drop the least recently used third (never what was drawn in the last 2 s)
+			const list = [ ...cache.entries() ].filter( e => now - e[ 1 ].used > 2000 ).sort( ( a, b ) => a[ 1 ].used - b[ 1 ].used ).slice( 0, 140 );
+			for ( const [ k, v ] of list ) { v.dead = true; v.img.removeAttribute( 'src' ); cache.delete( k ); }
 
 		}
 
+		t = { img: new Image(), ok: false, used: now, dead: false };
+		t.img.crossOrigin = 'anonymous';
+		t.img.decoding = 'async';
+		t.img.src = TMS + layer + '/' + z + '/' + x + '/' + y + ( layer === 'foto' ? '.jpg' : '.png' );
+		// decode off the main thread before the first drawImage, otherwise each new tile stalls a frame
+		t.img.decode().then( () => { if ( ! t.dead ) { t.ok = true; gen ++; } }, () => {} );
+		cache.set( key, t );
+
 	}
 
-	t.used = performance.now();
+	t.used = now;
 	return t;
 
 }
@@ -52,7 +58,7 @@ export class TileMap {
 
 	resize() {
 
-		const r = this.canvas.getBoundingClientRect(), d = Math.min( 2, window.devicePixelRatio || 1 );
+		const r = { width: this.canvas.offsetWidth, height: this.canvas.offsetHeight }, d = Math.min( 2, window.devicePixelRatio || 1 );
 		const w = Math.max( 1, Math.round( r.width * d ) ), h = Math.max( 1, Math.round( r.height * d ) );
 		if ( this.canvas.width !== w || this.canvas.height !== h ) { this.canvas.width = w; this.canvas.height = h; }
 		this.dpr = d; this.w = r.width; this.h = r.height;
@@ -101,7 +107,7 @@ export class TileMap {
 					const pz = z - up, pM = RES0 / 2 ** pz * 256;
 					const px = Math.floor( ( e0 + 1 - GRID_E ) / pM ), py = Math.floor( ( n1 - 1 - GRID_N ) / pM );
 					const p = cache.get( 'foto' + pz + '/' + px + '/' + py );
-					if ( ! p || ! p.ok ) { if ( up === 1 ) tile( 'foto', pz, px, py ); continue; }
+					if ( ! p || ! p.ok || p.dead ) { if ( up === 1 ) tile( 'foto', pz, px, py ); continue; }
 					const f = 256 / 2 ** up, sx = ( e0 - ( GRID_E + px * pM ) ) / pM * 256, sy = ( ( GRID_N + ( py + 1 ) * pM ) - n1 ) / pM * 256;
 					ctx.drawImage( p.img, sx, sy, f, f, x, y, s + 0.6, s + 0.6 );
 					break;
