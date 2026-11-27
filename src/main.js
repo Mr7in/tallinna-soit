@@ -8,7 +8,7 @@ import { toLest } from './lest.js';
 import { Roads } from './roads.js';
 import { Facades } from './facades.js';
 import { Skids } from './skids.js';
-import { TileMap, worldToEN, enToWorld } from './map.js';
+import { TileMap, worldToEN, enToWorld, tileGen } from './map.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -159,6 +159,8 @@ function setEnv( car, env, k = 1 ) {
 }
 
 addEventListener( 'resize', () => {
+
+	miniFW = 0;
 
 	camera.aspect = innerWidth / innerHeight;
 	camera.updateProjectionMatrix();
@@ -1128,22 +1130,35 @@ function drawTacho() {
 }
 
 // ---------- maps ----------
-const mini = new TileMap( $( 'mini' ), { labels: true, rotate: true } );
+const mini = new TileMap( $( 'mini' ), { labels: true, rotate: false } );
 const big = new TileMap( $( 'bigc' ), { labels: true, rotate: false } );
 big.places = PLACES.map( p => { const { E, N } = toLest( p.lat, p.lon ); return { name: p.name, E, N }; } );
 big.cursor = true;
-let mapOpen = false, miniT = 0;
+let mapOpen = false;
+// The minimap is drawn north-up onto an oversized canvas only when the car has moved far enough or new tiles
+// arrived; every frame just shifts and rotates that canvas with a CSS transform (compositor only, no repaint).
+const miniCar = $( 'minicar' );
+let miniE = 0, miniN = 0, miniGen = - 1, miniDrawT = 0, miniFW = 0;
 function renderMinimap( dt ) {
 
-	miniT -= dt;
-	if ( miniT > 0 ) return;
-	miniT = 1 / 30;
 	const { E, N } = worldToEN( vehicle.pos.x, vehicle.pos.z );
-	mini.E = E; mini.N = N;
-	mini.mpp = 340 / Math.max( 60, $( 'mapframe' ).clientWidth );
-	mini.heading = Math.PI - ( camYaw + orbit.yaw );
-	mini.car = { E, N, yaw: vehicle.yaw };
-	mini.draw();
+	miniDrawT -= dt;
+	const dx = ( E - miniE ) / mini.mpp, dy = ( miniN - N ) / mini.mpp;
+	if ( Math.hypot( dx, dy ) > miniFW * 0.12 || ( miniDrawT <= 0 && miniGen !== tileGen() ) || miniFW === 0 ) {
+
+		miniFW = $( 'mapframe' ).offsetWidth;
+		mini.mpp = 340 / Math.max( 60, miniFW );
+		mini.E = miniE = E; mini.N = miniN = N;
+		miniGen = tileGen();
+		mini.draw();
+		miniDrawT = 0.25;
+
+	}
+
+	const ox = ( E - miniE ) / mini.mpp, oy = ( miniN - N ) / mini.mpp;
+	const h = Math.PI - ( camYaw + orbit.yaw );
+	mini.canvas.style.transform = `rotate(${ ( - h ).toFixed( 4 )}rad) translate(${ ( - ox ).toFixed( 2 )}px,${ ( - oy ).toFixed( 2 )}px)`;
+	miniCar.style.transform = `rotate(${ ( Math.PI - vehicle.yaw - h ).toFixed( 4 )}rad)`;
 
 }
 

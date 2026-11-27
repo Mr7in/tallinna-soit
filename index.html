@@ -69,7 +69,8 @@
   #toast { position:absolute; left:50%; top:76px; transform:translateX(-50%); background:var(--bg); border:1px solid var(--line); padding:8px 18px; font:600 16px 'Barlow Condensed',sans-serif; letter-spacing:.16em; text-transform:uppercase; opacity:0; transition:opacity .25s; }
   #tacho { position:absolute; right:12px; bottom:10px; width:250px; height:250px; }
   #mapframe { position:absolute; left:14px; bottom:14px; width:200px; height:200px; border:1px solid rgba(255,255,255,.25); border-radius:6px; overflow:hidden; box-shadow:0 0 0 3px rgba(12,13,15,.6); pointer-events:auto; cursor:pointer; background:#5d6a52; }
-  #mapframe canvas { width:100%; height:100%; display:block; }
+  #mapframe canvas { position:absolute; left:-35%; top:-35%; width:170%; height:170%; display:block; will-change:transform; }
+  #mapframe .car { position:absolute; left:50%; top:50%; width:20px; height:23px; margin:-12px 0 0 -10px; will-change:transform; }
   #mapframe .key { position:absolute; right:5px; top:5px; font:600 11px 'Barlow Condensed',sans-serif; letter-spacing:.1em; background:rgba(12,13,15,.7); border:1px solid var(--line); padding:1px 5px; color:#c9cdd3; }
   #fps { position:absolute; right:8px; top:6px; font:600 12px 'Barlow Condensed',sans-serif; letter-spacing:.08em; color:#cfd3d8; background:rgba(12,13,15,.55); padding:1px 6px; border-radius:3px; min-width:46px; text-align:right; }
   #fps.low { color:#ff8a7a; }
@@ -148,7 +149,7 @@
   <div id="info"><span id="i-car">Rally 4WD</span><span class="sep"></span><span class="m" id="i-mode">Rally</span><span class="sep"></span><span id="i-place">Kristiine</span></div>
   <div id="status">Laen linna<small>Maa-ameti 3D-majad ja ortofoto</small></div>
   <div id="toast"></div>
-  <div id="mapframe"><canvas id="mini"></canvas><span class="key">M</span></div>
+  <div id="mapframe"><canvas id="mini"></canvas><svg class="car" id="minicar" viewBox="-10 -12.5 20 23"><path d="M0-11L8 8L0 3L-8 8Z" fill="#ffb400" stroke="#111" stroke-width="2" stroke-linejoin="round"/></svg><span class="key">M</span></div>
   <div id="fps">-- FPS</div>
   <canvas id="tacho" width="500" height="500"></canvas>
   <div id="attr">Majad, fassaadid, kõrgusmudel, puud, ortofoto: Maa- ja Ruumiamet · Tänavad: © OpenStreetMap · Helid: CC0 · Autod (Sketchfab): ddiaz-design, szymonpasterczyk, Lexyc16 · Puud: Deni S., Gravel Rally tree pack (CC BY 4.0)</div>
