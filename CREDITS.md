@@ -11,6 +11,12 @@
 - Street furniture (Sketchfab), public/models/props.glb:
   - Street lamp: Jampre, "Tall Street Light" (CC BY 4.0), https://sketchfab.com/3d-models/tall-street-light-003525de53d14e1387033f956fe3392a
   - Bus shelter and bench: TampaJoey, "City Props Collection volume 1" (Sketchfab Standard license), https://sketchfab.com/3d-models/city-props-collection-volume-1-32b8b82bb1e9489c993799c91967a916
+  - Traffic light: matsi_mus, "low poly Europe Traffic Light" (CC BY 4.0), https://sketchfab.com/3d-models/low-poly-europe-traffic-light-efb70b6a20ee4eab8b4d7958daae3614
+  - Parked cars (all CC BY 4.0):
+    - Matrixxy, "Low-Poly Volkswagen Golf GTI Mk3 1993", https://sketchfab.com/3d-models/low-poly-volkswagen-golf-gti-mk3-1993-ed77f74d644c453cb41bb780645b1b32
+    - StudioBluFox, "Volvo 940 Estate", https://sketchfab.com/3d-models/volvo-940-estate-8923f8eb34c74ac59d68e1fb342657c4
+    - Wersaus33, "Toyota Corolla - PS1 Low Poly", https://sketchfab.com/3d-models/toyota-corolla-ps1-low-poly-472028eb6e7d471a9f20bb7d3eef9a64
+    - Constantine Tvalashvili, "BMW E36 Low Poly", https://sketchfab.com/3d-models/bmw-e36-low-poly-free-download-9336774b0d704ad9acfe306caed7c185
   - Waste bin: joonas1233, "Trashcan from Tallinn, Lasnamägi" (CC BY 4.0), https://sketchfab.com/3d-models/trashcan-from-tallinn-lasnamagi-0ec9237fc126469bb5165d086added92
 
 The models in public/models were prepared with scripts/models/build-cars.mjs, build-trees.mjs and build-props.mjs
