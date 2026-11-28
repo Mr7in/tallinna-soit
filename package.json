@@ -4,7 +4,7 @@
   "scripts": {
     "prepare-city": "node scripts/prepare-city.mjs",
     "dev": "vite",
-    "build": "node --max-old-space-size=6000 scripts/prepare-city.mjs && node --max-old-space-size=6000 scripts/prepare-extra.mjs && vite build",
+    "build": "node --max-old-space-size=6000 scripts/prepare-city.mjs && node --max-old-space-size=6000 scripts/prepare-extra.mjs && node --max-old-space-size=6000 scripts/prepare-names.mjs && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

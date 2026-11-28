@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ParkedCars } from './parked.js';
+import { StreetNames } from './streetnames.js';
 import { models, LENS, LENS_Z } from './props.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { ORIGIN_E, ORIGIN_N } from './world.js';
@@ -343,6 +344,7 @@ export class Roads {
 		this.radius = 2;
 		this.onPropFall = null;
 		this.parked = new ParkedCars( this );
+		this.names = new StreetNames( this );
 		const T = textures();
 		this.mats = {
 			// small offsets only: a large polygon offset pulls the street in front of the wheels at low camera angles
@@ -404,6 +406,7 @@ export class Roads {
 
 		};
 
+		this.names.load( c );
 		fetch( `./city/o_${key}.json` ).then( r => r.json() ).then( d => { c.data = d; tryBuild(); } ).catch( () => {} );
 		return c;
 
@@ -694,6 +697,7 @@ export class Roads {
 		c.surf = ras;
 		this.buildWater( c, d.wt || [], ras, g );
 		c.group = g;
+		this.names.build( c );
 		this.group.add( g );
 		const wc = W.chunks.get( key );
 		if ( wc ) W.cullTrees( wc );
@@ -741,12 +745,13 @@ export class Roads {
 			g.add( im );
 			if ( + type === 2 ) {
 
-				c.signals = list;
+				const sig = list.concat( this.buildArms( c, list, g ) );
+				c.signals = sig;
 				c.lenses = LENS.map( ( [ y ] ) => {
 
-					const lm = new THREE.InstancedMesh( M.lens, M.lensMat, list.length );
+					const lm = new THREE.InstancedMesh( M.lens, M.lensMat, sig.length );
 					lm.userData.y = y;
-					list.forEach( ( p, i ) => lm.setMatrixAt( i, this.lensMatrix( p, y, m4 ) ) );
+					sig.forEach( ( p, i ) => lm.setMatrixAt( i, this.lensMatrix( p, y, m4 ) ) );
 					lm.computeBoundingSphere();
 					g.add( lm );
 					return lm;
@@ -757,6 +762,57 @@ export class Roads {
 			}
 
 		}
+
+	}
+
+	// Mast arms over the big roads (as on Tallinn's main streets): a light at the kerb of a road 9 m or wider
+	// gets a taller pole with an arm reaching over its lanes and a second head hanging above them.
+	// Returns the hanging heads, which join the chunk's signals (same phase as their pole).
+	buildArms( c, list, g ) {
+
+		const W = ( c.data && c.data.w ) || [], M = models(), heads = [], arms = [];
+		for ( const p of list ) {
+
+			let best = null;
+			for ( const [ kind, width, , oneway, bridge, , , flat ] of W ) {
+
+				if ( kind > 2 || bridge || width < 9 ) continue;
+				for ( let k = 0; k + 2 < flat.length; k += 2 ) {
+
+					const ax = flat[ k ], az = flat[ k + 1 ], dx = flat[ k + 2 ] - ax, dz = flat[ k + 3 ] - az, l2 = dx * dx + dz * dz || 1;
+					const t = Math.max( 0, Math.min( 1, ( ( p.x - ax ) * dx + ( p.z - az ) * dz ) / l2 ) );
+					const px = ax + dx * t, pz = az + dz * t, d = Math.hypot( p.x - px, p.z - pz );
+					if ( d < width / 2 + 5 && ( ! best || d < best.d ) ) best = { d, px, pz, width, oneway };
+
+				}
+
+			}
+
+			// at the kerb, not on an island in the middle of the road
+			if ( ! best || best.d < best.width / 2 - 1 || best.d < 2 ) continue;
+			const ux = ( best.px - p.x ) / best.d, uz = ( best.pz - p.z ) / best.d;
+			const L = Math.max( 4, Math.min( 11, best.oneway ? best.d + best.width / 2 - 2 : best.d - 0.8 ) );
+			// one arm per approach
+			if ( arms.some( a => Math.hypot( a.x - p.x, a.z - p.z ) < 14 && a.ux * ux + a.uz * uz > 0.7 ) ) continue;
+			arms.push( { x: p.x, z: p.z, y: p.y, ux, uz, L } );
+			p.solid = true; p.h = 6; // a steel mast does not fall over
+			for ( const f of L > 8 ? [ 0.45, 0.85 ] : [ 0.75 ] ) heads.push( { type: 2, head: true, x: p.x + ux * L * f, z: p.z + uz * L * f, y: p.y + 2.0, yaw: p.yaw, fallen: false } );
+
+		}
+
+		if ( ! arms.length ) return heads;
+		const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3();
+		const mast = new THREE.InstancedMesh( M.mast, M.mat, arms.length ), arm = new THREE.InstancedMesh( M.arm, M.mat, arms.length );
+		arms.forEach( ( a, i ) => {
+
+			mast.setMatrixAt( i, m4.compose( v.set( a.x, a.y, a.z ), q.identity(), ONE ) );
+			arm.setMatrixAt( i, m4.compose( v.set( a.x, a.y + 5.9, a.z ), q.setFromAxisAngle( Y, Math.atan2( - a.uz, a.ux ) ), sc.set( a.L, 1, 1 ) ) );
+
+		} );
+		const hm = new THREE.InstancedMesh( M.head, M.mat, heads.length );
+		heads.forEach( ( h, i ) => hm.setMatrixAt( i, this.matrix( h, m4 ) ) );
+		for ( const im of [ mast, arm, hm ] ) { im.userData.sh = 1; im.computeBoundingSphere(); g.add( im ); }
+		return heads;
 
 	}
 
@@ -997,6 +1053,7 @@ export class Roads {
 
 		c.alive = false;
 		this.parked.drop( c );
+		this.names.drop( c );
 		this.chunks.delete( key );
 		if ( c.group ) {
 

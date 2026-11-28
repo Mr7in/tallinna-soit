@@ -245,6 +245,7 @@ world.onTreeFall = h => audio.play( 'treefall.ogg', Math.min( 1, 0.4 + h / 25 ) 
 const roads = new Roads( world );
 roads.env = envTex;
 const facades = new Facades( world );
+roads.names.facades = facades;
 roads.onPropFall = p => { audio.bang( p.type === 3 ? 0.8 : 0.35 ); rumble( 0.6, 0.4, 120 ); };
 const skids = new Skids( scene );
 let car = null;
@@ -1561,6 +1562,7 @@ function loop( now ) {
 	world.animate( dt );
 	roads.animate( dt );
 	roads.parked.update( dt, vehicle.pos.x, vehicle.pos.z );
+	roads.names.update( dt, vehicle.pos.x, vehicle.pos.z );
 	wall.material.uniforms.uCar.value.copy( vehicle.pos );
 
 	// car visuals

@@ -116,6 +116,21 @@ export function models() {
 			part( Box( 1, 1.1, 0.03 ), 0x9a7650, 0, 0.66, 0 ),
 		] ), 1.35, 0.5 ],
 	};
+	// mast arm parts: taller, thicker pole; arm 1 m long along +X (scaled to the reach); hanging head (same
+	// layout as the pole head, centred at y 3.0, hanger on top up to the arm)
+	MODELS.mast = mergeGeometries( [
+		part( Cyl( 0.09, 0.12, 6.05, 10 ), GALV, 0, 3.02, 0 ),
+		part( Cyl( 0.14, 0.15, 0.35, 10 ), GALV_DARK, 0, 0.17, 0 ),
+	] );
+	MODELS.arm = mergeGeometries( [
+		part( Cyl( 0.07, 0.07, 1, 8 ), GALV, 0.5, 0, 0, 0, 0, Math.PI / 2 ),
+	] );
+	MODELS.head = mergeGeometries( [
+		part( Box( 0.3, 1.0, 0.2 ), BLACK, 0, 3.0, 0.12 ),
+		part( Box( 0.38, 1.12, 0.03 ), BLACK, 0, 3.0, 0.005 ),
+		...LENS.map( ( [ y ] ) => part( new THREE.CylinderGeometry( 0.112, 0.112, 0.16, 10, 1, true, - Math.PI / 2, Math.PI ), BLACK, 0, y, 0.3, - Math.PI / 2 ) ),
+		part( Box( 0.06, 0.36, 0.06 ), GALV, 0, 3.68, 0.05 ),
+	] );
 	MODELS.lens = new THREE.CircleGeometry( 0.1, 14 );
 	MODELS.mat = new THREE.MeshLambertMaterial( { vertexColors: true, side: THREE.DoubleSide } ); // double-sided for the open lamp hoods
 	MODELS.lensMat = new THREE.MeshBasicMaterial( { color: 0xffffff } );
