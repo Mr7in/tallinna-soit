@@ -1400,6 +1400,8 @@ async function startGame() {
 		const d = S.detail;
 		world.radius = d;
 		roads.radius = d === 2 ? 1 : 2;
+		roads.parked.phone = d === 2;
+		roads.parked.clear = vehicle.pos;
 		facades.radius = d === 2 ? 170 : 330;
 		facades.sharp = d !== 2; // the sharpening costs four extra texture reads: computers only
 		facades.maxTex = d === 2 ? 1024 : 4096; // photo facades at full resolution on computers
@@ -1412,6 +1414,8 @@ async function startGame() {
 		showStatus( 'Laen linna', 'Maa-ameti 3D-majad ja ortofoto' );
 		try { await world.init(); } catch ( e ) { showStatus( 'Oih!', 'Linna andmeid ei saanud laadida.' ); return; }
 		started = true;
+		// parked cars load after the city is up, so they never hold back the start
+		setTimeout( () => roads.parked.load().catch( e => console.warn( 'parked cars', e ) ), 2500 );
 		if ( audio.ctx ) audio.load();
 
 	}
@@ -1497,6 +1501,7 @@ function loop( now ) {
 	if ( shadowT <= 0 ) { tagShadows(); shadowT = 1; }
 	world.animate( dt );
 	roads.animate( dt );
+	roads.parked.update( dt, vehicle.pos.x, vehicle.pos.z );
 	wall.material.uniforms.uCar.value.copy( vehicle.pos );
 
 	// car visuals

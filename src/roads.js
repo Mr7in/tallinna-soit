@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ParkedCars } from './parked.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { ORIGIN_E, ORIGIN_N } from './world.js';
 
@@ -442,6 +443,7 @@ export class Roads {
 		this.t = 0;
 		this.radius = 2;
 		this.onPropFall = null;
+		this.parked = new ParkedCars( this );
 		const T = textures();
 		this.mats = {
 			// small offsets only: a large polygon offset pulls the street in front of the wheels at low camera angles
@@ -773,6 +775,7 @@ export class Roads {
 		}
 
 		this.buildProps( c, d.p || [], g, d.b || [] );
+		this.parked.fill( c );
 		if ( piers.length ) {
 
 			const n = piers.length / 6, im = new THREE.InstancedMesh( PIER, this.mats.kerb, n ), m = new THREE.Matrix4(), q = new THREE.Quaternion();
@@ -1094,6 +1097,7 @@ export class Roads {
 	unload( key, c ) {
 
 		c.alive = false;
+		this.parked.drop( c );
 		this.chunks.delete( key );
 		if ( c.group ) {
 

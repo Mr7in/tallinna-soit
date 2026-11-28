@@ -469,7 +469,7 @@ export class Vehicle {
 				if ( d >= min || d < 1e-4 ) continue;
 				const n = new V3( dx / d, 0, dz / d );
 				const vn = this.vel.dot( n );
-				if ( - vn > 2.5 + tr.h * 0.25 ) {
+				if ( ! tr.solid && - vn > 2.5 + tr.h * 0.25 ) { // parked cars are solid: they never fall over
 
 					const sp = Math.hypot( this.vel.x, this.vel.z ) || 1;
 					world.fellTree( tr, this.vel.x / sp, this.vel.z / sp );
