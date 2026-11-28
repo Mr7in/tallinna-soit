@@ -2,7 +2,11 @@
 
 - Buildings, facades, terrain, trees, orthophoto: Maa- ja Ruumiamet
 - Streets: © OpenStreetMap contributors
-- Sounds: CC0
+- Engine, exhaust pop, tyre squeal and crash sounds: cut from YouTube clips supplied by the project owner
+  ("Volvo 850 T-5R straight pipe exhaust", "Volvo 850 T5R Straight exhaust sound / Lots of bangs", "Volvo 850 T5 cold start Maximizer",
+  "INSANE Intake sound on BMW E30 M3 DTM", "BMW M3 Engine Sound Comparison", "Subaru Impreza 22B Revs Blitz Nur spec exhaust",
+  "Car brake and crash Sound Effect - Audio Vampire", "Car Crash SFX"), prepared with scripts/audio/build.py
+- Other sounds (tree fall, fallback engine): CC0
 - Cars (Sketchfab):
   - "1998 Subaru Impreza 22B STi" by ddiaz-design, https://sketchfab.com/3d-models/1998-subaru-impreza-22b-sti-69fcc7e96cc74acc90daa03b0c133ea4
   - "Volvo 850 T5 R Estate 1995" by szymonpasterczyk, https://sketchfab.com/3d-models/volvo-850-t5-r-estate-1995-d9f04691f9a94d9daa3d35fdf65ca8b4

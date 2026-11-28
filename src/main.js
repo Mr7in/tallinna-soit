@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { World, toWorld } from './world.js';
-import { Vehicle, CAR_SPECS } from './vehicle.js';
+import { Vehicle, CAR_SPECS, IDLE } from './vehicle.js';
 import { buildCar, rumble, carModelsReady } from './car.js';
 import { toLest } from './lest.js';
 import { Roads } from './roads.js';
@@ -245,7 +245,7 @@ world.onTreeFall = h => audio.play( 'treefall.ogg', Math.min( 1, 0.4 + h / 25 ) 
 const roads = new Roads( world );
 roads.env = envTex;
 const facades = new Facades( world );
-roads.onPropFall = p => { audio.play( 'crash.ogg', p.type === 3 ? 0.9 : 0.45 ); rumble( 0.6, 0.4, 120 ); };
+roads.onPropFall = p => { audio.bang( p.type === 3 ? 0.8 : 0.35 ); rumble( 0.6, 0.4, 120 ); };
 const skids = new Skids( scene );
 let car = null;
 
@@ -265,6 +265,7 @@ function selectCar( id ) {
 	const spec = specOf( id );
 	vehicle.setSpec( spec );
 	vehicle.setAuto( S.auto );
+	audio.setCar( id );
 	makeCar( id );
 	if ( started && ! spawning ) vehicle.place( vehicle.pos.x, vehicle.pos.z, vehicle.yaw );
 	refreshUI();
@@ -698,7 +699,7 @@ addEventListener( 'pointermove', e => {
 
 } );
 
-// ---------- audio: CC0 samples (engine loops, skid, crash, tree fall), synth fallback ----------
+// ---------- audio: recorded engines per car (public/audio), CC0 samples (tree fall), synth fallback ----------
 const ENGINE_RPM = [ 900, 2200, 3400, 4600, 5800, 7000 ];
 const audio = {
 	ctx: null, muted: S.muted, bufs: {}, engine: null,
@@ -744,8 +745,19 @@ const audio = {
 			try { this.bufs[ n ] = await this.ctx.decodeAudioData( await ( await fetch( './sfx/' + n ) ).arrayBuffer() ); } catch { /* skip */ }
 
 		} ) );
+		// real recordings: per-car engine loops (cut from exhaust/intake clips), pops, tyre squeal, crashes
+		try {
+
+			this.am = await ( await fetch( './audio/audio.json' ) ).json();
+			const dec = async n => this.ctx.decodeAudioData( await ( await fetch( './audio/' + n ) ).arrayBuffer() );
+			const names = [ 'skid.wav', 'crash0.wav', 'crash1.wav', 'bump0.wav', 'bump1.wav', ...this.am.pops, ...Object.keys( this.am.engines ).map( id => 'engine-' + id + '.wav' ) ];
+			await Promise.all( names.map( async n => { try { this.bufs[ n ] = await dec( n ); } catch { /* skip */ } } ) );
+
+		} catch { this.am = null; }
+
+		this.setCar( S.car );
 		const loops = ENGINE_RPM.map( ( _, i ) => this.bufs[ 'engine' + i + '.wav' ] );
-		if ( loops.every( Boolean ) ) {
+		if ( ! this.car && loops.every( Boolean ) ) {
 
 			this.engine = loops.map( ( b, i ) => {
 
@@ -759,7 +771,13 @@ const audio = {
 
 		}
 
-		if ( this.bufs[ 'skid.mp3' ] ) {
+		if ( this.bufs[ 'skid.wav' ] ) {
+
+			const src = this.skidSrc = this.ctx.createBufferSource(); src.buffer = this.bufs[ 'skid.wav' ]; src.loop = true;
+			this.skid = this.ctx.createGain(); this.skid.gain.value = 0;
+			src.connect( this.skid ).connect( this.master ); src.start( 0, Math.random() * src.buffer.duration );
+
+		} else if ( this.bufs[ 'skid.mp3' ] ) {
 
 			const src = this.ctx.createBufferSource(); src.buffer = this.bufs[ 'skid.mp3' ]; src.loop = true;
 			src.loopStart = 0.3; src.loopEnd = Math.min( src.buffer.duration, 3.3 );
@@ -769,13 +787,69 @@ const audio = {
 		}
 
 	},
+	// one engine per car: pitch-flattened loops at several engine speeds, on-throttle and off-throttle sets
+	setCar( id ) {
+
+		if ( ! this.ctx || ! this.am || ( this.car && this.car.id === id ) ) return;
+		const t = this.ctx.currentTime;
+		if ( this.car ) for ( const l of this.car.loops ) { l.g.gain.setTargetAtTime( 0, t, 0.05 ); l.src.stop( t + 0.4 ); }
+		this.car = null;
+		const e = this.am.engines[ id ], buf = this.bufs[ 'engine-' + id + '.wav' ];
+		if ( ! e || ! buf ) return;
+		const loops = e.loops.map( m => {
+
+			const src = this.ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+			src.loopStart = m.s / e.sr; src.loopEnd = ( m.s + m.n ) / e.sr;
+			const g = this.ctx.createGain(); g.gain.value = 0;
+			src.connect( g ).connect( this.lp ); src.start( t, src.loopStart + Math.random() * ( m.n / e.sr ) );
+			return { ...m, src, g, w: 0 };
+
+		} );
+		const set = k => loops.filter( l => l.kind === k || l.kind === 'idle' ).sort( ( a, b ) => a.f - b.f );
+		const on = set( 'on' ), off = set( 'off' );
+		this.car = { id, e, loops, on, off, offTop: off[ off.length - 1 ].f };
+		if ( this.engine ) for ( const l of this.engine ) l.g.gain.value = 0;
+		this.syn.gain.value = 0;
+
+	},
+	mixSet( L, fT, share ) {
+
+		if ( share <= 0 ) return;
+		let i = 0;
+		while ( i < L.length - 2 && fT > L[ i + 1 ].f ) i ++;
+		const a = Math.max( 0, Math.min( 1, Math.log( fT / L[ i ].f ) / Math.log( L[ i + 1 ].f / L[ i ].f ) ) );
+		L[ i ].w += ( 1 - a ) * share; L[ i + 1 ].w += a * share;
+
+	},
 	update( rpm, throttle, slide, speed, boost = 0, quiet = false ) {
 
 		if ( ! this.ctx ) return;
 		const t = this.ctx.currentTime, mute = this.muted || quiet ? 0 : 1;
 		// the same loops serve every car: higher-revving engines play them a little faster
 		const r = rpm * ( 7200 / vehicle.redline ) ** 0.5;
-		if ( this.engine ) {
+		if ( this.car ) {
+
+			// recorded engines cover idle to mid revs; above that the pitch keeps climbing on a gentler curve
+			const c = this.car, e = c.e;
+			const gx = Math.log( e.fTop * 1.25 / e.fIdle ) / Math.log( vehicle.redline / IDLE );
+			const fT = e.fIdle * Math.max( 0.85, rpm / IDLE ) ** gx;
+			const m = Math.max( 0, Math.min( 1, throttle ) );
+			// off-throttle recordings stop lower than on-throttle ones: hand over to the muffled on-set
+			const hand = Math.max( 0, Math.min( 1, ( fT / c.offTop - 1.05 ) / 0.25 ) );
+			for ( const l of c.loops ) l.w = 0;
+			this.mixSet( c.on, fT, Math.sqrt( m ) + Math.sqrt( 1 - m ) * hand * 0.8 );
+			this.mixSet( c.off, fT, Math.sqrt( 1 - m ) * ( 1 - hand ) );
+			const vol = ( 0.32 + m * 0.4 ) * mute;
+			for ( const l of c.loops ) {
+
+				l.g.gain.setTargetAtTime( l.w * vol, t, 0.035 );
+				l.src.playbackRate.setTargetAtTime( Math.max( 0.4, Math.min( 2.6, fT / l.f ) ), t, 0.025 );
+
+			}
+
+			this.lp.frequency.setTargetAtTime( 1400 + m * 7000, t, 0.08 );
+
+		} else if ( this.engine ) {
 
 			let k = 0;
 			while ( k < ENGINE_RPM.length - 2 && r > ENGINE_RPM[ k + 1 ] ) k ++;
@@ -798,6 +872,7 @@ const audio = {
 		}
 
 		if ( this.skid ) this.skid.gain.setTargetAtTime( Math.min( 0.5, slide * Math.min( 1, speed / 5 ) * 0.55 ) * mute, t, 0.06 );
+		if ( this.skidSrc ) this.skidSrc.playbackRate.setTargetAtTime( 0.85 + Math.min( 1, slide ) * 0.2 + Math.min( 1, speed / 40 ) * 0.1, t, 0.1 );
 		if ( this.tw ) {
 
 			const b = boost * mute;
@@ -828,6 +903,8 @@ const audio = {
 	pop( k ) {
 
 		if ( ! this.ctx || this.muted ) return;
+		const pops = this.am ? this.am.pops.filter( n => this.bufs[ n ] ) : [];
+		if ( pops.length ) return this.play( pops[ Math.floor( Math.random() * pops.length ) ], 0.25 + k * 0.35, 0.85 + Math.random() * 0.35 );
 		const c = this.ctx, t = c.currentTime;
 		const o = c.createOscillator(); o.type = 'triangle';
 		o.frequency.setValueAtTime( 110 + Math.random() * 40, t ); o.frequency.exponentialRampToValueAtTime( 45, t + 0.09 );
@@ -837,10 +914,10 @@ const audio = {
 		if ( Math.random() < 0.5 ) this.noise( 0.03, 'highpass', 3000, 2000, 0.5, 0.25 * k, 0.03 + Math.random() * 0.05 );
 
 	},
-	play( name, vol = 1 ) {
+	play( name, vol = 1, rate = 1 ) {
 
 		if ( ! this.ctx || this.muted || ! this.bufs[ name ] ) return;
-		const src = this.ctx.createBufferSource(); src.buffer = this.bufs[ name ];
+		const src = this.ctx.createBufferSource(); src.buffer = this.bufs[ name ]; src.playbackRate.value = rate;
 		const g = this.ctx.createGain(); g.gain.value = vol;
 		src.connect( g ).connect( this.master ); src.start();
 
@@ -848,6 +925,9 @@ const audio = {
 	bang( s ) {
 
 		if ( ! this.ctx || this.muted ) return;
+		const have = [ 0, 1 ].map( i => ( s < 0.45 ? 'bump' : 'crash' ) + i + '.wav' ).filter( n => this.bufs[ n ] );
+		const real = have[ Math.floor( Math.random() * have.length ) ];
+		if ( real ) return this.play( real, Math.min( 1, 0.35 + s * 0.8 ), 0.92 + Math.random() * 0.16 );
 		if ( this.bufs[ 'crash.ogg' ] ) return this.play( 'crash.ogg', Math.min( 1, s * 1.2 ) );
 		const n = this.ctx.createBufferSource(); n.buffer = this.noiseBuf;
 		const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 300;
