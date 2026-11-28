@@ -10,7 +10,7 @@ SR = 32000
 OUT = '/home/claude/tallinna-soit/public/audio'
 FILES = {
     'sub': '68d42c91', 'vbang': 'b5b486f9', 'vpipe': '54181d53', 'vcold': '316f164e', 'vstr': '4cbb112e',
-    'bint': '2cc38e7a', 'bcmp': '80dd4a3d', 'crashA': 'ad74d053', 'crashB': 'd458d9e8',
+    'bint': '2cc38e7a', 'bcmp': '80dd4a3d', 'crashA': 'ad74d053', 'crashB': 'd458d9e8', 'sub2': 'e3be203e', 'e30': '970e8c7d',
 }
 _cache = {}
 
@@ -35,11 +35,11 @@ def f0_curve(key):
 # (source, t0, t1, kind) hand-picked from the f0 plots: monotone or steady stretches only
 CARS = {
     'rally': {
-        'idle': ('sub', 1.0, 2.0),
-        'segs': [('sub', 2.0, 2.45, 'on'), ('sub', 3.75, 3.95, 'on'), ('sub', 4.85, 5.3, 'on'), ('sub', 6.45, 6.8, 'on'),
-                 ('sub', 7.25, 7.75, 'on'), ('sub', 9.15, 9.35, 'on'),
-                 ('sub', 2.6, 3.5, 'off'), ('sub', 4.0, 4.8, 'off'), ('sub', 5.45, 6.4, 'off'), ('sub', 7.8, 9.1, 'off'),
-                 ('sub', 9.45, 9.9, 'off')],
+        'idle': ('sub2', 8.0, 11.0),
+        'segs': [('sub2', 12.1, 12.95, 'on'), ('sub2', 15.4, 16.45, 'on'), ('sub2', 22.2, 23.0, 'on'), ('sub2', 36.4, 36.9, 'on'),
+                 ('sub2', 39.3, 39.9, 'on'), ('sub2', 56.9, 57.25, 'on'),
+                 ('sub2', 13.1, 15.0, 'off'), ('sub2', 16.6, 18.5, 'off'), ('sub2', 57.4, 59.8, 'off'), ('sub2', 61.2, 62.8, 'off'),
+                 ('sub2', 37.0, 38.2, 'off')],
     },
     'touring': {
         'idle': ('vstr', 20.0, 32.0),
@@ -50,10 +50,9 @@ CARS = {
                  ('vcold', 5.0, 6.5, 'off'), ('vcold', 1.5, 2.3, 'off'), ('vbang', 0.1, 0.9, 'off')],
     },
     'coupe': {
-        'idle': ('bcmp', 0.0, 1.0),
-        'segs': [('bint', 0.05, 0.6, 'on'), ('bint', 0.7, 2.45, 'on'), ('bint', 2.55, 4.95, 'on'), ('bint', 5.05, 7.45, 'on'),
-                 ('bcmp', 4.1, 4.45, 'on'), ('bcmp', 1.0, 1.5, 'on'),
-                 ('bcmp', 3.0, 3.45, 'off'), ('bcmp', 1.5, 2.0, 'off')],
+        'idle': ('e30', 231.2, 233.0),
+        'segs': [('e30', 199.5, 205.2, 'on'), ('e30', 207.2, 210.4, 'on'), ('e30', 211.6, 215.4, 'on'),
+                 ('e30', 215.6, 221.0, 'off'), ('e30', 222.2, 230.0, 'off'), ('e30', 205.3, 206.8, 'off')],
     },
 }
 
@@ -88,6 +87,12 @@ def best_window(f, lo, hi, minlen):
     return best if best and best[1] - best[0] >= minlen else None
 
 
+def spiky(y):
+    sos = butter(4, 3000, 'highpass', fs=SR_IN, output='sos')
+    e = np.convolve(np.abs(sosfiltfilt(sos, y)), np.ones(220) / 220, 'same')
+    return e.max() / (np.median(e) + 1e-9)
+
+
 def rms(y): return np.sqrt(np.mean(y ** 2)) + 1e-9
 
 
@@ -117,7 +122,8 @@ def build_car(cid, cfg):
                     if w:
                         j0, j1 = i0 + w[0], i0 + w[1]
                         cyc = np.sum(f[j0:j1]) / SR_IN
-                        cands.append((cyc / tol, s, j0, j1, cyc))
+                        clean = 1.0 if spiky(x[j0:j1]) < 4.0 else 0.15
+                        cands.append((cyc / tol * clean, s, j0, j1, cyc))
                         break
             if not cands: continue
             _, s, j0, j1, cyc = max(cands)

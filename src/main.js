@@ -69,6 +69,7 @@ const S = {
 	detail: store.get( 'detail', isTouch ? 2 : 3 ),
 	cam: 0,
 	muted: store.get( 'muted', false ),
+	music: store.get( 'music', 0.5 ),
 	colors: store.get( 'colors', {} ),
 };
 if ( ! CAR_SPECS.find( c => c.id === S.car ) ) S.car = 'rally';
@@ -347,7 +348,8 @@ const OPTS = {
 	place: { label: 'Koht', values: PLACES.map( ( _, i ) => i ), names: PLACES.map( p => p.name ), get: () => S.place, set: v => { S.place = v; store.set( 'place', v ); if ( started && ! inMenu ) pendingPlace = v; } },
 	cam: { label: 'Kaamera', values: CAMS.map( ( _, i ) => i ), names: CAMS.map( c => c.name ), get: () => S.cam, set: v => { S.cam = v; } },
 	detail: { label: 'Graafika', values: [ 2, 3 ], names: [ 'Tahvel', 'Arvuti' ], get: () => S.detail, set: v => { S.detail = v; store.set( 'detail', v ); } },
-	sound: { label: 'Heli', values: [ false, true ], names: [ 'Sees', 'Väljas' ], get: () => S.muted, set: v => { S.muted = v; audio.muted = v; store.set( 'muted', v ); if ( ! v ) audio.unlock(); } },
+	sound: { label: 'Heli', values: [ false, true ], names: [ 'Sees', 'Väljas' ], get: () => S.muted, set: v => { S.muted = v; audio.muted = v; store.set( 'muted', v ); if ( ! v ) audio.unlock(); audio.musicLevel(); } },
+	music: { label: 'Muusika', values: [ 0, 0.25, 0.5, 0.75, 1 ], names: [ 'Väljas', '25%', '50%', '75%', '100%' ], get: () => S.music, set: v => { S.music = v; store.set( 'music', v ); audio.musicLevel(); } },
 };
 let pendingPlace = null;
 
@@ -377,8 +379,8 @@ function buildOpts( el, keys ) {
 
 }
 
-buildOpts( $( 'mopts' ), [ 'mode', 'auto', 'color', 'place', 'detail', 'sound' ] );
-buildOpts( $( 'popts' ), [ 'car', 'mode', 'auto', 'color', 'cam', 'place', 'sound' ] );
+buildOpts( $( 'mopts' ), [ 'mode', 'auto', 'color', 'place', 'detail', 'sound', 'music' ] );
+buildOpts( $( 'popts' ), [ 'car', 'mode', 'auto', 'color', 'cam', 'place', 'sound', 'music' ] );
 
 for ( const spec of CAR_SPECS ) {
 
@@ -493,6 +495,7 @@ const keys = new Set();
 const touch = { left: false, right: false, gas: false, brake: false, hand: false };
 const ctl = { throttle: 0, brake: 0, steer: 0, handbrake: false };
 
+addEventListener( 'pointerdown', () => audio.unlock() );
 addEventListener( 'keydown', e => {
 
 	audio.unlock();
@@ -702,6 +705,7 @@ addEventListener( 'pointermove', e => {
 
 // ---------- audio: recorded engines per car (public/audio), CC0 samples (tree fall), synth fallback ----------
 const ENGINE_RPM = [ 900, 2200, 3400, 4600, 5800, 7000 ];
+const MUSIC = [ 'tln447-1.mp3', 'tln447-2.mp3', 'tln447-3.mp3', 'tln447-4.mp3', 'tln447-5.mp3' ];
 const audio = {
 	ctx: null, muted: S.muted, bufs: {}, engine: null,
 	unlock() {
@@ -732,8 +736,60 @@ const audio = {
 			this.twN = ctx.createGain(); this.twN.gain.value = 0;
 			wn.connect( this.twBp ).connect( this.twN ).connect( this.master ); wn.start();
 			if ( world.manifest ) this.load();
+			this.musicInit();
 
 		} catch { this.ctx = null; }
+
+	},
+	// ---- music: the five TLN 4:47 tracks, shuffled, looping as a playlist ----
+	musicInit() {
+
+		const el = this.mel = new Audio();
+		el.preload = 'auto';
+		this.musicGain = this.ctx.createGain(); this.musicGain.gain.value = 0;
+		this.ctx.createMediaElementSource( el ).connect( this.musicGain ).connect( this.ctx.destination );
+		el.onended = () => this.nextTrack();
+		this.queue = [];
+		this.nextTrack();
+
+	},
+	nextTrack( fade = false ) {
+
+		if ( ! this.mel ) return;
+		if ( fade && ! this.mel.paused && this.musicTarget() > 0 ) {
+
+			// fade the current song out, then start a new one
+			const t = this.ctx.currentTime;
+			this.musicGain.gain.cancelScheduledValues( t );
+			this.musicGain.gain.setTargetAtTime( 0, t, 0.25 );
+			clearTimeout( this.fadeT );
+			this.fadeT = setTimeout( () => this.nextTrack(), 1100 );
+			return;
+
+		}
+
+		if ( ! this.queue.length ) {
+
+			const q = MUSIC.slice();
+			for ( let i = q.length - 1; i > 0; i -- ) { const j = Math.floor( Math.random() * ( i + 1 ) ); [ q[ i ], q[ j ] ] = [ q[ j ], q[ i ] ]; }
+			if ( q[ 0 ] === this.track ) q.push( q.shift() ); // never the same song twice in a row
+			this.queue = q;
+
+		}
+
+		this.track = this.queue.shift();
+		this.mel.src = './music/' + this.track;
+		this.musicLevel();
+
+	},
+	musicTarget() { return this.muted ? 0 : S.music * 0.55; },
+	musicLevel() {
+
+		if ( ! this.mel ) return;
+		const v = this.musicTarget(), t = this.ctx.currentTime;
+		this.musicGain.gain.cancelScheduledValues( t );
+		this.musicGain.gain.setTargetAtTime( v, t, 0.3 );
+		if ( v > 0 ) { if ( this.ctx.state === 'suspended' ) this.ctx.resume(); this.mel.play().catch( () => {} ); } else this.mel.pause();
 
 	},
 	async load() {
@@ -1449,6 +1505,7 @@ function placeSun() {
 async function startGame() {
 
 	audio.unlock();
+	audio.nextTrack( true ); // a new song every time the drive starts
 	inMenu = false;
 	$( 'menu' ).style.display = 'none';
 	$( 'hud' ).style.display = 'block';
@@ -1625,4 +1682,4 @@ openMenu();
 requestAnimationFrame( loop );
 
 // test hooks
-window.__game = { renderer, scene, camera, sun, openMap, closeMap, teleport, big, mini, orbit, get mapOpen() { return mapOpen; }, vehicle, world, roads, facades, ctl, keys, skids, CAR_SPECS, S, selectCar, setPaused, startGame, cycle, get car() { return car; }, get spawning() { return spawning; }, get paused() { return paused; } };
+window.__game = { audio, renderer, scene, camera, sun, openMap, closeMap, teleport, big, mini, orbit, get mapOpen() { return mapOpen; }, vehicle, world, roads, facades, ctl, keys, skids, CAR_SPECS, S, selectCar, setPaused, startGame, cycle, get car() { return car; }, get spawning() { return spawning; }, get paused() { return paused; } };

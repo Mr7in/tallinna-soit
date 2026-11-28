@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from scipy.signal import stft
 
-HOP = 256
+import os
+HOP = int(os.environ.get("HOP", 256))
 
 
 def load(name):

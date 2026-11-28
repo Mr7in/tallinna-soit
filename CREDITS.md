@@ -4,8 +4,9 @@
 - Streets: © OpenStreetMap contributors
 - Engine, exhaust pop, tyre squeal and crash sounds: cut from YouTube clips supplied by the project owner
   ("Volvo 850 T-5R straight pipe exhaust", "Volvo 850 T5R Straight exhaust sound / Lots of bangs", "Volvo 850 T5 cold start Maximizer",
-  "INSANE Intake sound on BMW E30 M3 DTM", "BMW M3 Engine Sound Comparison", "Subaru Impreza 22B Revs Blitz Nur spec exhaust",
+  "1987 BMW M3 E30 0-100km/h engine sound", "Subaru Impreza STi - Prodrive vs. Blitz Nur Spec R Exhaust",
   "Car brake and crash Sound Effect - Audio Vampire", "Car Crash SFX"), prepared with scripts/audio/build.py
+- Music: "TLN447" tracks 1-5 by Martin (made and licensed with Suno)
 - Other sounds (tree fall, fallback engine): CC0
 - Cars (Sketchfab):
   - "1998 Subaru Impreza 22B STi" by ddiaz-design, https://sketchfab.com/3d-models/1998-subaru-impreza-22b-sti-69fcc7e96cc74acc90daa03b0c133ea4
