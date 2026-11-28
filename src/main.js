@@ -70,9 +70,7 @@ const S = {
 	cam: 0,
 	muted: store.get( 'muted', false ),
 	colors: store.get( 'colors', {} ),
-	look: store.get( 'look', 'ps1' ),
 };
-if ( S.look !== 'ps1' && S.look !== 'sharp' ) S.look = 'ps1';
 if ( ! CAR_SPECS.find( c => c.id === S.car ) ) S.car = 'rally';
 const specOf = id => CAR_SPECS.find( c => c.id === id );
 
@@ -87,14 +85,16 @@ renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.autoClear = false;
 
 const scene = new THREE.Scene();
-// TLN 4:47: June white night, the sun just over the horizon (palette from the CI: koidusinine, valge öö roosa, kuldne tund)
-const HORIZON = new THREE.Color( 0xd9a9b6 );
+// TLN 4:47: a June morning at five, the sun just coming up over the horizon. Clear air, pale horizon, warm low light.
+const HORIZON = new THREE.Color( 0xd3dde6 );
 scene.background = HORIZON;
 scene.fog = new THREE.Fog( HORIZON, 450, 1250 );
-const hemi = new THREE.HemisphereLight( 0xa9aee0, 0x4a3d48, 1.05 );
+const hemi = new THREE.HemisphereLight( 0xcfdcee, 0x5c5850, 1.2 );
 scene.add( hemi );
-const SUN_DIR = new THREE.Vector3( - 0.62, 0.36, 0.48 ).normalize(); // low dawn sun: long, warm light
-const sun = new THREE.DirectionalLight( 0xffc58e, 1.55 );
+const SUN_DIR = new THREE.Vector3( - 0.62, 0.3, 0.48 ).normalize(); // low morning sun: long, warm light
+// the sun disc in the sky sits right on the horizon (the light comes a little higher so shadows stay usable)
+const SKY_SUN = new THREE.Vector3( SUN_DIR.x, 0.02, SUN_DIR.z ).normalize();
+const sun = new THREE.DirectionalLight( 0xffd9ae, 1.75 );
 sun.castShadow = true;
 sun.shadow.intensity = 0.62;
 sun.shadow.bias = - 0.0006;
@@ -104,7 +104,7 @@ scene.add( sun, sun.target );
 // sky dome: horizon haze, blue zenith, a soft sun glow and drifting fair-weather clouds (all in the shader, no textures)
 const sky = new THREE.Mesh( new THREE.SphereGeometry( 3000, 32, 16 ), new THREE.ShaderMaterial( {
 	side: THREE.BackSide, depthWrite: false, fog: false,
-	uniforms: { uSun: { value: SUN_DIR }, uHor: { value: HORIZON }, uZen: { value: new THREE.Color( 0x2b3a67 ) }, uTime: { value: 0 } },
+	uniforms: { uSun: { value: SKY_SUN }, uHor: { value: HORIZON }, uZen: { value: new THREE.Color( 0x3b6fb4 ) }, uTime: { value: 0 } },
 	vertexShader: 'varying vec3 vD; void main(){ vD = normalize( position ); vec4 p = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); gl_Position = p.xyww; }',
 	fragmentShader: `uniform vec3 uSun, uHor, uZen; uniform float uTime; varying vec3 vD;
 		float hash( vec2 p ) { return fract( sin( dot( p, vec2( 127.1, 311.7 ) ) ) * 43758.5453 ); }
@@ -115,10 +115,10 @@ const sky = new THREE.Mesh( new THREE.SphereGeometry( 3000, 32, 16 ), new THREE.
 		float fbm( vec2 p ) { float v = 0.0, a = 0.5; for ( int i = 0; i < 5; i ++ ) { v += a * noise( p ); p = p * 2.03 + vec2( 1.7, 9.2 ); a *= 0.5; } return v; }
 		void main(){
 			float h = max( vD.y, 0.0 );
-			vec3 c = mix( uHor, uZen, pow( h, 0.42 ) );
-			// the sunrise side of the sky burns gold near the horizon
+			vec3 c = mix( uHor, uZen, pow( h, 0.5 ) );
+			// sunrise: a warm yellow-orange band low on the sun's side only
 			float sh = max( dot( normalize( vec3( vD.x, 0.0001, vD.z ) ), normalize( vec3( uSun.x, 0.0, uSun.z ) ) ), 0.0 );
-			c = mix( c, vec3( 0.96, 0.68, 0.40 ), pow( sh, 3.0 ) * ( 1.0 - smoothstep( 0.0, 0.35, h ) ) * 0.75 );
+			c = mix( c, vec3( 1.0, 0.80, 0.52 ), pow( sh, 6.0 ) * ( 1.0 - smoothstep( 0.0, 0.18, h ) ) * 0.8 );
 			c = mix( c, uHor * 0.92, smoothstep( 0.0, -0.08, vD.y ) );
 			float s = max( dot( vD, uSun ), 0.0 );
 			// clouds on a flat layer high above: project the view ray onto it
@@ -127,11 +127,11 @@ const sky = new THREE.Mesh( new THREE.SphereGeometry( 3000, 32, 16 ), new THREE.
 				float n = fbm( uv );
 				float cov = smoothstep( 0.48, 0.72, n );
 				float thick = smoothstep( 0.5, 0.9, n );
-				vec3 cc = mix( vec3( 0.95, 0.70, 0.74 ), vec3( 0.42, 0.40, 0.58 ), thick * 0.8 );
-				cc += vec3( 1.0, 0.74, 0.42 ) * pow( sh, 4.0 ) * 0.45 * ( 1.0 - thick );
-				c = mix( c, cc, cov * smoothstep( 0.02, 0.22, vD.y ) * 0.7 );
+				vec3 cc = mix( vec3( 0.97, 0.96, 0.94 ), vec3( 0.66, 0.70, 0.76 ), thick * 0.7 );
+				cc += vec3( 1.0, 0.78, 0.48 ) * pow( sh, 5.0 ) * 0.4 * ( 1.0 - thick );
+				c = mix( c, cc, cov * smoothstep( 0.02, 0.22, vD.y ) * 0.75 );
 			}
-			c += vec3( 1.0, 0.82, 0.55 ) * ( pow( s, 900.0 ) * 6.0 + pow( s, 16.0 ) * 0.45 );
+			c += vec3( 1.0, 0.86, 0.6 ) * ( pow( s, 700.0 ) * 8.0 + pow( s, 24.0 ) * 0.5 + pow( s, 4.0 ) * 0.12 );
 			gl_FragColor = vec4( c, 1.0 );
 			#include <tonemapping_fragment>
 			#include <colorspace_fragment>
@@ -145,63 +145,37 @@ scene.add( sky );
 const camera = new THREE.PerspectiveCamera( 55, innerWidth / innerHeight, 0.3, 4000 );
 camera.layers.enable( 2 );
 
-// ---------- TLN 4:47 look: low resolution, dawn grade, ordered dither, CRT lines ----------
-// the scene goes into a small HDR target, then one full-screen pass tone maps, grades and pixelates it
-const LOOKS = {
-	ps1: { h: 360, levels: 31, scan: 0.16 }, // 15-bit colour, nearest upscale
-	sharp: { h: 0, levels: 0, scan: 0 }, // full resolution, the grade only
-};
-const lookRT = new THREE.WebGLRenderTarget( 1, 1, { type: THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false } );
+// ---------- TLN 4:47 look: full resolution, 4x MSAA, filmic tone curve, a light morning grade ----------
+const lookRT = new THREE.WebGLRenderTarget( 1, 1, { type: THREE.HalfFloatType, samples: 4 } );
 const postScene = new THREE.Scene(), postCam = new THREE.OrthographicCamera( - 1, 1, 1, - 1, 0, 1 );
 const postMat = new THREE.ShaderMaterial( {
 	depthTest: false, depthWrite: false,
-	uniforms: { tSrc: { value: lookRT.texture }, uRes: { value: new THREE.Vector2( 1, 1 ) }, uLevels: { value: 31 }, uScan: { value: 0.16 } },
+	uniforms: { tSrc: { value: lookRT.texture } },
 	vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4( position.xy, 0.0, 1.0 ); }',
-	fragmentShader: `uniform sampler2D tSrc; uniform vec2 uRes; uniform float uLevels, uScan; varying vec2 vUv;
-		vec3 neutral( vec3 c ) {
-			float x = min( c.r, min( c.g, c.b ) ); c -= x < 0.08 ? x - 6.25 * x * x : 0.04;
-			float peak = max( c.r, max( c.g, c.b ) ); if ( peak < 0.76 ) return c;
-			float d = 0.24, np = 1.0 - d * d / ( peak + d - 0.76 ); c *= np / peak;
-			return mix( c, vec3( np ), 1.0 - 1.0 / ( 0.15 * ( peak - np ) + 1.0 ) );
+	fragmentShader: `uniform sampler2D tSrc; varying vec2 vUv;
+		// ACES fitted (Hill): the filmic roll-off of the PS3/X360-era games, punchy mids, soft highlights
+		vec3 aces( vec3 c ) {
+			c = mat3( 0.59719, 0.07600, 0.02840, 0.35458, 0.90834, 0.13383, 0.04823, 0.01566, 0.83777 ) * c;
+			c = ( c * ( c + 0.0245786 ) - 0.000090537 ) / ( c * ( 0.983729 * c + 0.4329510 ) + 0.238081 );
+			return mat3( 1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602 ) * c;
 		}
-		float b2( vec2 a ) { a = floor( a ); return fract( dot( a, vec2( 0.5, a.y * 0.75 ) ) ); }
-		float bayer( vec2 a ) { return b2( 0.5 * a ) * 0.25 + b2( a ); }
+		vec3 srgb( vec3 c ) { return mix( c * 12.92, 1.055 * pow( c, vec3( 1.0 / 2.4 ) ) - 0.055, step( 0.0031308, c ) ); }
 		void main(){
-			vec3 c = neutral( max( texture2D( tSrc, vUv ).rgb, 0.0 ) );
-			// valge öö grade: blue shadows, warm pink-gold highlights, lifted blacks, a little less saturation
+			vec3 c = aces( max( texture2D( tSrc, vUv ).rgb, 0.0 ) * 1.1 );
+			// morning grade: a touch warmer in the light, a touch cooler in the shade, nothing else
 			float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
-			c = mix( vec3( l ), c, 0.86 );
-			c *= mix( vec3( 0.80, 0.85, 1.14 ), vec3( 1.10, 0.97, 0.86 ), smoothstep( 0.04, 0.7, l ) );
-			c = c * 0.93 + vec3( 0.016, 0.018, 0.042 );
-			c = pow( clamp( c, 0.0, 1.0 ), vec3( 1.0 / 2.2 ) );
-			vec2 px = floor( vUv * uRes );
-			if ( uLevels > 0.0 ) c = floor( c * uLevels + bayer( px ) ) / uLevels;
-			c *= 1.0 - uScan * step( 0.62, fract( vUv.y * uRes.y ) );
-			vec2 q = vUv - 0.5; c *= 1.0 - dot( q, q ) * 0.5;
+			c *= mix( vec3( 0.97, 0.99, 1.03 ), vec3( 1.03, 1.0, 0.96 ), smoothstep( 0.1, 0.7, l ) );
+			c = srgb( clamp( c, 0.0, 1.0 ) );
+			vec2 q = vUv - 0.5; c *= 1.0 - dot( q, q ) * 0.22;
 			gl_FragColor = vec4( c, 1.0 );
 		}`,
 } );
 { const q = new THREE.Mesh( new THREE.PlaneGeometry( 2, 2 ), postMat ); q.frustumCulled = false; postScene.add( q ); }
 const _db = new THREE.Vector2();
-let lookKey = '';
 function present( scn, cam ) {
 
-	const L = LOOKS[ S.look ] || LOOKS.ps1;
 	renderer.getDrawingBufferSize( _db );
-	const h = L.h ? Math.min( L.h, _db.y ) : _db.y, w = Math.max( 1, Math.round( h * _db.x / Math.max( 1, _db.y ) ) );
-	const k = w + 'x' + h + S.look;
-	if ( k !== lookKey ) {
-
-		lookKey = k;
-		const ms = L.h ? 0 : 4;
-		if ( lookRT.samples !== ms ) { lookRT.samples = ms; lookRT.dispose(); }
-		lookRT.setSize( w, h );
-		postMat.uniforms.uRes.value.set( w, h );
-		postMat.uniforms.uLevels.value = L.levels;
-		postMat.uniforms.uScan.value = L.scan;
-
-	}
-
+	if ( lookRT.width !== _db.x || lookRT.height !== _db.y ) lookRT.setSize( _db.x, _db.y );
 	renderer.setRenderTarget( lookRT );
 	renderer.clear();
 	renderer.render( scn, cam );
@@ -302,11 +276,11 @@ function selectCar( id ) {
 const show = new THREE.Scene();
 const showCam = new THREE.PerspectiveCamera( 30, innerWidth / innerHeight, 0.1, 100 );
 show.background = new THREE.Color( 0x141a33 );
-show.add( new THREE.HemisphereLight( 0xb7a8c9, 0x14121c, 0.6 ) );
+show.add( new THREE.HemisphereLight( 0xdfe6f0, 0x15161a, 0.55 ) );
 const key = new THREE.SpotLight( 0xffd9a8, 170, 30, 0.55, 0.6 );
 key.position.set( 4, 7, 3 ); key.castShadow = true; key.shadow.mapSize.set( 2048, 2048 ); key.shadow.bias = - 0.0002;
 show.add( key, key.target );
-const rim = new THREE.DirectionalLight( 0xe8a0a8, 1.6 ); rim.position.set( - 5, 3, - 6 ); show.add( rim );
+const rim = new THREE.DirectionalLight( 0xb9d0ff, 1.3 ); rim.position.set( - 5, 3, - 6 ); show.add( rim );
 {
 
 	// floor with a soft light pool
@@ -371,7 +345,6 @@ const OPTS = {
 	place: { label: 'Koht', values: PLACES.map( ( _, i ) => i ), names: PLACES.map( p => p.name ), get: () => S.place, set: v => { S.place = v; store.set( 'place', v ); if ( started && ! inMenu ) pendingPlace = v; } },
 	cam: { label: 'Kaamera', values: CAMS.map( ( _, i ) => i ), names: CAMS.map( c => c.name ), get: () => S.cam, set: v => { S.cam = v; } },
 	detail: { label: 'Graafika', values: [ 2, 3 ], names: [ 'Tahvel', 'Arvuti' ], get: () => S.detail, set: v => { S.detail = v; store.set( 'detail', v ); } },
-	look: { label: 'Pilt', values: [ 'ps1', 'sharp' ], names: [ 'PS1', 'Terav' ], get: () => S.look, set: v => { S.look = v; store.set( 'look', v ); } },
 	sound: { label: 'Heli', values: [ false, true ], names: [ 'Sees', 'Väljas' ], get: () => S.muted, set: v => { S.muted = v; audio.muted = v; store.set( 'muted', v ); if ( ! v ) audio.unlock(); } },
 };
 let pendingPlace = null;
@@ -402,8 +375,8 @@ function buildOpts( el, keys ) {
 
 }
 
-buildOpts( $( 'mopts' ), [ 'mode', 'auto', 'color', 'place', 'look', 'detail', 'sound' ] );
-buildOpts( $( 'popts' ), [ 'car', 'mode', 'auto', 'color', 'cam', 'place', 'look', 'sound' ] );
+buildOpts( $( 'mopts' ), [ 'mode', 'auto', 'color', 'place', 'detail', 'sound' ] );
+buildOpts( $( 'popts' ), [ 'car', 'mode', 'auto', 'color', 'cam', 'place', 'sound' ] );
 
 for ( const spec of CAR_SPECS ) {
 
@@ -418,6 +391,11 @@ for ( const spec of CAR_SPECS ) {
 
 const DRIVE = { awd: '4WD', fwd: 'FWD', rwd: 'RWD' };
 const TAGS = { rally: '4WD · Turbo · Boxer 2.2', touring: 'Esivedu · Turbo · 5 silindrit', coupe: 'Tagavedu · S14 2.3' };
+const DESCS = {
+	rally: 'Ralli MM-i tiitlite auks tehtud piiratud seeria 1998. aastast. Lai WRC-kere, kuldsed veljed ja 2,2-liitrine turbo-boxer. Nelikvedu haarab igal pinnal, kõige kodusem kitsastel vanalinna tänavatel.',
+	touring: 'Tolle aja kõige kiirem Volvo universaal (1995), mille arendusse panustas ka Porsche. 2,3-liitrine viiesilindriline turbo. Esivedu ja suur pöördemoment teevad temast sirgete kuninga, aga kurvi tuleb sõita ettevaatlikult.',
+	coupe: 'Ringrajasõidu jaoks sündinud homologatsiooniauto: kastilised poritiivad ja kõrgete pööretega neljasilindriline S14. Kerge, täpne ja tagaveoline, ehk loodud driftimiseks.',
+};
 function refreshUI() {
 
 	for ( const row of document.querySelectorAll( '.opt' ) ) {
@@ -431,6 +409,7 @@ function refreshUI() {
 	const sp = specOf( S.car );
 	$( 'ci-name' ).textContent = sp.name;
 	$( 'ci-tag' ).textContent = TAGS[ sp.id ];
+	$( 'ci-desc' ).textContent = DESCS[ sp.id ] || '';
 	$( 'ci-hp' ).textContent = sp.hp;
 	$( 'ci-kg' ).textContent = sp.mass;
 	$( 'ci-rpm' ).textContent = sp.redline;
@@ -1137,7 +1116,7 @@ let toastT = 0;
 function toast( t ) { const el = $( 'toast' ); el.textContent = t; el.style.opacity = 1; clearTimeout( toastT ); toastT = setTimeout( () => { el.style.opacity = 0; }, 1300 ); }
 
 const tctx = $( 'tacho' ).getContext( '2d' );
-const FONT = '"VT323", monospace';
+const FONT = '"Barlow Condensed", sans-serif';
 function drawTacho() {
 
 	const c = tctx, W = 500, cx = 250, cy = 250, R = 220;
@@ -1155,7 +1134,7 @@ function drawTacho() {
 	c.beginPath(); c.arc( cx, cy, R - 10, a0, ang( vehicle.rpm ) ); c.lineWidth = 10; c.strokeStyle = hot ? '#e0442e' : '#eceef1'; c.stroke();
 	c.beginPath(); c.arc( cx, cy, R - 26, ang( vehicle.redline ), a1 ); c.lineWidth = 6; c.strokeStyle = '#e0442e'; c.stroke();
 	c.fillStyle = '#eceef1'; c.strokeStyle = 'rgba(255,255,255,.7)';
-	c.font = `400 40px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+	c.font = `600 30px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle';
 	for ( let r = 0; r <= max; r += 500 ) {
 
 		const a = ang( r ), big = r % 1000 === 0;
@@ -1176,15 +1155,15 @@ function drawTacho() {
 	// gear + speed
 	const g = vehicle.gear === - 1 ? 'R' : vehicle.gear === 0 ? 'N' : String( vehicle.gear );
 	c.fillStyle = hot ? '#e0442e' : '#ffffff';
-	c.font = `400 150px ${FONT}`;
+	c.font = `700 120px ${FONT}`;
 	c.fillText( g, cx, cy + 86 );
 	c.fillStyle = '#ffffff';
-	c.font = `400 72px ${FONT}`;
+	c.font = `600 54px ${FONT}`;
 	c.fillText( Math.round( Math.abs( vehicle.speed ) * 3.6 ), cx, cy + 166 );
-	c.font = `400 28px ${FONT}`;
+	c.font = `500 20px ${FONT}`;
 	c.fillStyle = '#8d939c';
 	c.fillText( 'KM/H', cx, cy + 200 );
-	c.font = `400 30px ${FONT}`;
+	c.font = `600 22px ${FONT}`;
 	c.fillStyle = vehicle.auto ? '#f4c27a' : '#8d939c';
 	c.fillText( vehicle.auto ? 'AUTO' : 'MANUAAL', cx, cy - 62 );
 	if ( vehicle.spec.turbo ) {

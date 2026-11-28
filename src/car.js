@@ -72,7 +72,7 @@ export const CAR_IDS = Object.keys( DEFS );
 const MODELS = {};
 
 // Estonian number plates: front and rear plate centre (height, z) in the body frame of each model
-const PLATES = { rally: { f: [ 0.47, 1.975 ], r: [ 0.66, - 2.345 ] }, touring: { f: [ 0.42, 1.922 ], r: [ 0.74, - 2.681 ] }, coupe: { f: [ 0.4, 2.021 ], r: [ 0.605, - 2.19 ] } };
+const PLATES = { rally: { f: [ 0.47, 1.975 ], r: [ 0.66, - 2.345 ] }, touring: { f: [ 0.42, 2.005 ], r: [ 0.74, - 2.598 ] }, coupe: { f: [ 0.4, 2.021 ], r: [ 0.605, - 2.19 ] } };
 const plateText = id => {
 
 	// one random plate per car, kept in this browser: three digits and three letters ("123 ABC")
@@ -448,6 +448,10 @@ export function buildCar( id = 'rally', colorIndex = 0 ) {
 			if ( o.material.transparent ) o.castShadow = false;
 
 		} );
+		// the Volvo export places its body about 8 cm behind the axles (measured: arch centres at z 0.94 and -1.73,
+		// hubs at 1.02 and -1.64), so the wheels sat in the front of the arches. Move the shell, not the physics axles.
+		const BODY_SHIFT = { touring: 0.083 };
+		src.position.z += BODY_SHIFT[ id ] || 0;
 		body.add( src );
 		wheels.length = 0;
 		for ( let i = 0; i < 4; i ++ ) {
