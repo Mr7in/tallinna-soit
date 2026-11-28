@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ParkedCars } from './parked.js';
+import { models, LENS, LENS_Z } from './props.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { ORIGIN_E, ORIGIN_N } from './world.js';
 
@@ -301,108 +302,6 @@ function runs( pts, keep, step = 1 ) {
 
 }
 
-// ---------- street furniture models (merged, vertex coloured, +Z faces the road / traffic) ----------
-function part( geo, hex, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0 ) {
-
-	geo = geo.toNonIndexed();
-	geo.rotateX( rx ); geo.rotateY( ry ); geo.rotateZ( rz );
-	geo.translate( x, y, z );
-	const c = new THREE.Color( hex ), n = geo.attributes.position.count, a = new Float32Array( n * 3 );
-	for ( let i = 0; i < n; i ++ ) { a[ i * 3 ] = c.r; a[ i * 3 + 1 ] = c.g; a[ i * 3 + 2 ] = c.b; }
-	geo.setAttribute( 'color', new THREE.BufferAttribute( a, 3 ) );
-	if ( geo.attributes.uv ) geo.deleteAttribute( 'uv' );
-	return geo;
-
-}
-
-const Box = ( w, h, d ) => new THREE.BoxGeometry( w, h, d );
-const Cyl = ( r0, r1, h, s = 8 ) => new THREE.CylinderGeometry( r0, r1, h, s );
-const POLE = 0x6f7478, DARK = 0x2b2e31;
-
-// type: [geometry, height, collision radius]
-let MODELS = null;
-function models() {
-
-	if ( MODELS ) return MODELS;
-	MODELS = {
-		1: [ mergeGeometries( [ // street lamp
-			part( Cyl( 0.07, 0.12, 8.6 ), POLE, 0, 4.3, 0 ),
-			part( Cyl( 0.16, 0.18, 0.6 ), DARK, 0, 0.3, 0 ),
-			part( Box( 0.07, 0.07, 1.7 ), POLE, 0, 8.45, 0.8 ),
-			part( Box( 0.32, 0.12, 0.62 ), 0x8d9296, 0, 8.36, 1.6 ),
-			part( Box( 0.26, 0.03, 0.5 ), 0xf2efe0, 0, 8.29, 1.6 ),
-		] ), 8.6, 0.16 ],
-		2: [ mergeGeometries( [ // traffic light (lenses are separate, animated)
-			part( Cyl( 0.07, 0.08, 3.5 ), POLE, 0, 1.75, 0 ),
-			part( Box( 0.36, 1.06, 0.26 ), DARK, 0, 3.0, 0.1 ),
-			part( Box( 0.5, 1.2, 0.03 ), 0xe6e6e2, 0, 3.0, - 0.04 ),
-			...[ 3.33, 3.0, 2.67 ].map( y => part( Box( 0.3, 0.04, 0.16 ), DARK, 0, y + 0.15, 0.3 ) ),
-			part( Box( 0.22, 0.28, 0.14 ), DARK, 0, 1.35, 0.1 ),
-		] ), 3.5, 0.13 ],
-		3: [ mergeGeometries( [ // bus shelter
-			part( Box( 3.6, 2.2, 0.05 ), 0x9db4c2, 0, 1.25, - 0.6 ),
-			part( Box( 0.05, 2.2, 1.3 ), 0x9db4c2, - 1.8, 1.25, 0 ),
-			part( Box( 0.05, 2.2, 1.3 ), 0x9db4c2, 1.8, 1.25, 0 ),
-			part( Box( 3.9, 0.12, 1.7 ), 0x3c4146, 0, 2.42, 0 ),
-			...[ - 1.82, 1.82 ].flatMap( x => [ part( Box( 0.08, 2.4, 0.08 ), DARK, x, 1.2, - 0.62 ), part( Box( 0.08, 2.4, 0.08 ), DARK, x, 1.2, 0.65 ) ] ),
-			part( Box( 2.2, 0.06, 0.4 ), 0x8a5a33, 0, 0.48, - 0.35 ),
-			part( Box( 1.6, 1.9, 0.07 ), 0xf1f0e8, - 0.9, 1.25, - 0.56 ), // advert
-			part( Cyl( 0.04, 0.04, 2.9 ), POLE, 2.4, 1.45, 0.8 ),
-			part( Box( 0.55, 0.55, 0.05 ), 0x1f5fbf, 2.4, 2.65, 0.8 ),
-			part( Box( 0.36, 0.3, 0.06 ), 0xffffff, 2.4, 2.65, 0.83 ),
-		] ), 2.5, 1.4 ],
-		4: [ mergeGeometries( [ // speed camera
-			part( Cyl( 0.1, 0.12, 3.3 ), 0x8e9398, 0, 1.65, 0 ),
-			part( Box( 0.5, 0.62, 0.8 ), 0x9aa0a5, 0, 3.55, 0 ),
-			part( Box( 0.46, 0.06, 0.86 ), 0x5d6266, 0, 3.89, 0 ),
-			part( Box( 0.3, 0.3, 0.04 ), 0x141414, 0, 3.6, 0.41 ),
-			part( Box( 0.5, 0.1, 0.02 ), 0xf2c300, 0, 3.2, 0.41 ),
-		] ), 3.9, 0.2 ],
-		5: [ mergeGeometries( [ // bench
-			part( Box( 1.7, 0.06, 0.45 ), 0x8a5a33, 0, 0.45, 0 ),
-			part( Box( 1.7, 0.38, 0.05 ), 0x8a5a33, 0, 0.75, - 0.22 ),
-			part( Box( 0.06, 0.45, 0.45 ), DARK, - 0.75, 0.22, 0 ),
-			part( Box( 0.06, 0.45, 0.45 ), DARK, 0.75, 0.22, 0 ),
-		] ), 0.95, 0.6 ],
-		6: [ part( Cyl( 0.24, 0.2, 0.85, 10 ), 0x2f5d3a, 0, 0.42, 0 ), 0.85, 0.28 ],
-		7: [ mergeGeometries( [ // give way
-			part( Cyl( 0.04, 0.04, 2.4 ), POLE, 0, 1.2, 0 ),
-			part( new THREE.CircleGeometry( 0.52, 3 ), 0xd4151b, 0, 2.15, 0.05, 0, 0, - Math.PI / 2 ),
-			part( new THREE.CircleGeometry( 0.36, 3 ), 0xffffff, 0, 2.15, 0.055, 0, 0, - Math.PI / 2 ),
-			part( new THREE.CircleGeometry( 0.52, 3 ), 0xb0b0b0, 0, 2.15, 0.045, 0, Math.PI, - Math.PI / 2 ),
-		] ), 2.6, 0.08 ],
-		8: [ mergeGeometries( [ // stop
-			part( Cyl( 0.04, 0.04, 2.4 ), POLE, 0, 1.2, 0 ),
-			part( new THREE.CircleGeometry( 0.42, 8 ), 0xffffff, 0, 2.15, 0.05, 0, 0, Math.PI / 8 ),
-			part( new THREE.CircleGeometry( 0.38, 8 ), 0xd4151b, 0, 2.15, 0.055, 0, 0, Math.PI / 8 ),
-			part( new THREE.CircleGeometry( 0.42, 8 ), 0xb0b0b0, 0, 2.15, 0.045, 0, Math.PI, Math.PI / 8 ),
-		] ), 2.6, 0.08 ],
-		// fence / hedge / wall panels: 1 m long along +X, scaled to the panel length
-		9: [ mergeGeometries( [
-			part( Box( 0.08, 1.3, 0.08 ), 0x4a4f52, - 0.48, 0.65, 0 ),
-			part( Box( 1, 0.05, 0.04 ), 0x5b6064, 0, 1.15, 0 ),
-			part( Box( 1, 0.05, 0.04 ), 0x5b6064, 0, 0.3, 0 ),
-			...[ - 0.36, - 0.24, - 0.12, 0, 0.12, 0.24, 0.36 ].map( x => part( Box( 0.05, 1.2, 0.02 ), 0x7a5a3c, x, 0.68, 0.025 ) ),
-		] ), 1.3, 0.5 ],
-		10: [ part( Box( 1.02, 1.25, 0.8 ), 0x3d6b33, 0, 0.62, 0 ), 1.25, 0.55 ],
-		11: [ mergeGeometries( [
-			part( Box( 1.01, 1.7, 0.3 ), 0xb2a690, 0, 0.85, 0 ),
-			part( Box( 1.03, 0.08, 0.36 ), 0x8d8473, 0, 1.73, 0 ),
-		] ), 1.75, 0.5 ],
-		// garden board fence (light: one post + one board panel)
-		12: [ mergeGeometries( [
-			part( Box( 0.09, 1.35, 0.09 ), 0x5e4a35, - 0.48, 0.67, 0 ),
-			part( Box( 1, 1.1, 0.03 ), 0x9a7650, 0, 0.66, 0 ),
-		] ), 1.35, 0.5 ],
-	};
-	MODELS.lens = new THREE.CircleGeometry( 0.12, 14 );
-	MODELS.mat = new THREE.MeshLambertMaterial( { vertexColors: true } );
-	MODELS.lensMat = new THREE.MeshBasicMaterial( { color: 0xffffff } );
-	return MODELS;
-
-}
-
-const LENS = [ [ 3.33, 0xff2a1a ], [ 3.0, 0xffb000 ], [ 2.67, 0x29e05a ] ];
 export const SEA_LEVEL = 0.0;
 const WATER_GEO = new THREE.PlaneGeometry( 250, 250, 1, 1 ).rotateX( - Math.PI / 2 );
 // water: dark green-blue, glossy, with small moving ripples; the mask texture cuts out the shore
@@ -871,7 +770,7 @@ export class Roads {
 
 	lensMatrix( p, y, m ) {
 
-		return this.matrix( p, m ).multiply( new THREE.Matrix4().makeTranslation( 0, y, 0.235 ) );
+		return this.matrix( p, m ).multiply( new THREE.Matrix4().makeTranslation( 0, y, LENS_Z ) );
 
 	}
 
