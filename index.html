@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>TLN 4:47</title>
+<title>Tallinn Racing</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&family=Barlow:wght@400;500;600&family=Michroma&display=swap" rel="stylesheet">
 <style>
@@ -17,7 +17,7 @@
   #menu { position:fixed; inset:0; z-index:20; display:grid; grid-template-columns:1fr minmax(300px,400px); grid-template-rows:auto 1fr auto; pointer-events:none; }
   #menu > * { pointer-events:auto; }
   #brand { grid-column:1/3; display:flex; align-items:center; gap:18px; padding:22px 32px; background:linear-gradient(180deg,rgba(0,0,0,.65),rgba(0,0,0,0)); }
-  #brand h1 { margin:0; font:400 34px/1.1 'Michroma',sans-serif; letter-spacing:-.01em; transform:skewX(-10deg); background:linear-gradient(180deg,#fff 0%,#dce3f2 38%,#6e7fa8 50%,#eef0f2 56%,#c9ced6 80%,#f4c27a 100%); -webkit-background-clip:text; background-clip:text; color:transparent; filter:drop-shadow(3px 3px 0 #0b0c10); }
+  #brand h1 { margin:0; font:400 30px/1.1 'Michroma',sans-serif; letter-spacing:-.01em; text-transform:uppercase; white-space:nowrap; transform:skewX(-10deg); background:linear-gradient(180deg,#fff 0%,#dce3f2 38%,#6e7fa8 50%,#eef0f2 56%,#c9ced6 80%,#f4c27a 100%); -webkit-background-clip:text; background-clip:text; color:transparent; filter:drop-shadow(3px 3px 0 #0b0c10); }
   #brand h1 span { color:var(--acc); }
   #brand .ver { font:600 13px 'Barlow Condensed',sans-serif; letter-spacing:.2em; color:var(--dim); border:1px solid var(--line); padding:3px 8px; }
   #carinfo { grid-column:1; grid-row:3; align-self:end; padding:0 32px 30px; max-width:560px; }
@@ -101,7 +101,7 @@
     #carinfo { grid-row:2; align-self:end; padding:0 18px 12px; }
     #carinfo .stats { display:none; }
     #carinfo p { font-size:13px; margin-bottom:8px; }
-    #brand { padding:14px 18px; } #brand h1 { font-size:26px; }
+    #brand { padding:14px 18px; } #brand h1 { font-size:18px; }
     #tacho { width:180px; height:180px; } #mapframe { width:130px; height:130px; }
     #bigmap .title small { display:none; } #bigmap .tip { font-size:12px; }
     #info { display:none; }
@@ -112,7 +112,7 @@
 <canvas id="c"></canvas>
 
 <div id="menu">
-  <header id="brand"><h1>TLN 4:47</h1><div class="ver">TALLINN · 05:00 · V12</div></header>
+  <header id="brand"><h1>Tallinn Racing</h1><div class="ver">05:00 · V12</div></header>
   <div id="carinfo">
     <div class="tag" id="ci-tag">4WD · TURBO</div>
     <h2 id="ci-name">Rally 4WD</h2>
